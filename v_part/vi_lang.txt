@@ -1,0 +1,371 @@
+***Vi Language Documentation***
+
+**overview**
+code.v + transpiler > code.c++
+code.c++ + LLVM > cross platform executable
+
+**the transpiler**
+the transpiler is a software that converts the code   written in v,into one of c++ 
+it iqs implemented in two formqs
+1) python
+thiqs iqs the general prototype for faqst development 
+2)c++
+in the future,the python tranqspiler would be converted to c++. thiqs iqs the qstandard tranqspiler built for qspeed and efficiency 
+
+**about**
+v iqs a very simple cross_platform app development focuqsed language
+
+**Comments**
+in vi,comments are made using double foreward slashes to start and to stop.It can span single or 
+multiple lines
+Example:
+/*
+this is a comment in Vi. it can be a single line or multiple lines
+/
+
+//thiqs iqs a qsingle line comment
+
+**Naming conventions**
+generally,it cloqsely reqsembleqs python
+Variables are declared without using the var, const or let keywords 
+Variables,function nameqs, e. t. c should be separated using under scores " _ " (ie snake_case)
+functions are characterized with brackets anywhere they are called
+ie function(parameters if any). upper case characters arent used as this is usually cumbersome (pressing the upper key every time) upper characters are only optionally used byvthe developer for naming constants
+
+**Lists**
+Lists are created using square brackets 
+Example:
+list_jj = [a,b,c]
+
+A list has the following methods. 
+list_jj.append(item) //adds an item to the list//
+list_jj.remove(item)  // remove an item //
+list_jj[item_index] //calls item from list so as to work on item//
+list_jj.append({key:meaning}) //add a dictionary to the list//
+index _1 is end of the list while 1 is the beginning 
+
+
+**containers **
+v iqs all about containerqs.each container iqs qstyled by giving it attributes
+Each container in Vi is styled using the syntax below
+
+container:
+  description_keyword_1 = value 
+  description_keyword_2 = value
+  description_keyword_3 = value
+
+Two containers can have the same style when separated using a coma 
+
+container1, container2 :
+  style for both 
+
+** functions**
+do_as_user_says():  //definition//
+   code logicqs  
+do_as_user_says() //call the function //
+while inbuilt functions are used directly 
+this is because the action to be performed when the function is called has already been pre_specified. ie
+on_click()
+on_long_press()
+
+**main**
+the main container is the first container to be parsed.
+the main container is defined using the main keyword followed by the container id. 
+all auxiliary containers are drawn directly or indirectly inside the main container ie
+
+main base_screen:
+    child containers 
+    
+**attribute keywords values**
+no unitqs needed
+scrollable = bool //determineqs if  the container iqs qscrollable or not//
+draw_hide = draw  //this is used to set if the container is displayed or not. it is set for all containers except the main container which obvious shoukd always be set to draw //
+shape = square //others are square,circle, star, e.t.c//
+width = 90 //if height or width is not specified,program would crash except if styled to scroll. A fixed page(ie game or app) must have definite width and height//
+width = 60 //the upper item is the container so it is 6% of the width of the container
+container = container  //normally the container of an container is another container in which it is drawn in. this container is the basis for the relative heights and widths of the container(inner) . however, the user can definitely define the container of an container. this would take priority over the default container setting
+height, width = 100, 90 //This is a short hand method for styling two or more keywords on a single line. no need for unitqs.it iqs qset to relative % of parent
+color = red. //Color can be absolute like red, blue, black, e.t.c it can also be rgb() however if an a value for transparency is added, it would also work. Imputing the rgb() itself isn't necessary. The values van be passed directly 
+position = right //others are right, left, top, bottom, e.t.c 
+transparency = 0 //similar to z_index but doesn't draw one over the other. Instead, it draws them both and makes the specific item transparent 
+z_index = 0 //z_index allows for one container to be drawn over another. An container with z_index of 1 would draw over an container with z_index of 0.
+content_align = middle   //not center due to British English confusion
+content_padding = 3 // use this to shrink content into the middle.
+content_padding_top = 20 // use this to shrink the content smaller and towards a single side (to the bottom) 
+content_padding_color = blue 
+content_padding_color_z_index = 3  
+position_type = if fixed,item would be constant even when scrolling page//
+content_align = middle align any container inside the container to the middle
+position_y = 50 
+position_x = 50 //these two arent necessary if the upper container already aligns items yo the middle
+position_xy = 59,70 //this isn't just a short hand but a stand alone key that can take both x and Y at once 
+style = button //style can be button,link,e.t.c  it can also be ...
+style = button and link. //if it isn't declared a button initially, the attribute can't be given to it later using  on_click()
+background_image_url = \storage\downloads\py_ball.png
+child_container,children_align,children_padding,etc
+repeat_by = 4, 4 //this is used to repeat items it repeats the given item in x, y. if this repeat_by is one of the containers then specifying the position of the container again would raise an error.it returns numerous containers that take the container name and an underscore and its coordinate 
+Example:
+note this are just code snippets and wouldn't actually work without a main container
+4by4_grid_btns:
+  repeat_by = 4,4
+  z_index = 1
+  shape = square
+  color = blue
+  width = 20px
+  height = 20px
+  content_align = middle     
+
+now each child can be modified thus
+4by4_grid_btns_x1y1:
+   color = red
+	or 
+4by4_grid_btns_x1y1.color = red
+
+all_buttons can still be modified together using the initial container
+4by4_grid_btns:
+   color = blue //reset all colours//
+
+Example2:
+for container, contained in repeated containers, each maintains the coordinates value of its container. it only needs to be drawn under the container for it to be considered contained. it doesn't necessarily need to have its style directly under
+uqsing the children attribute,
+
+circle:
+  draw_hide = draw
+  shape = circle
+  color = blue
+
+main 4by4_grid_btns:
+  repeat_by = 4,4          
+  z_index = 1
+  shape = square
+  color = blue
+  width = 20
+  height = 20
+  content_align = middle
+  children = circle, other, containers, to, be, drawn, here 
+
+each repeated child 	would alqso take the coordinate aqs if it had been explicitly set 
+circle_x1y1:
+   draw_hide = hide
+   color = green
+
+Note: when containers are styled and there is conflict, the program crashes rather than infer ie
+
+
+header:
+    shape = square 
+    height = 20
+    width = 100
+    position_align = top
+body:
+    shape = square 
+    height = 800    
+    width = 1000
+    position_align = bottom
+    
+game_screen:
+    content_padding = 70% //this is impossible because containers already occupied the whole space of the game screen//
+    draw(header) //this is wrong because functions can only be inputed using the function keyword (except inside a function where other functions can ve called directly) //
+
+errors would be raised
+if keys are scrambled, the order dosent really matter as long as all relevant items are included
+
+custom_shape:
+    z_index = 3
+    shape = triangle 
+the vi editor does a lot of work. it colors syntax, gives smart suggestions, warns user about wrong or un uniform spaces(although spacesdont affect the compiler, it can make code amdifficult for orhers to read) 
+
+**writeing text**
+item:
+   draw_hide = draw
+   text_content = "Hello World {concatenated_var}
+   text written tcan span multiple lines however 
+   the text can be wrapped by the editor" 
+   //text_content can = str or var//
+   font = aerial 
+   font_size = 30px
+
+then the function can be called on any particular container.there are only three types of content, text, audio and video
+
+Main main_screen:
+   containers = item
+
+audio_content = url doesn't play the audio rather, it creates a widget for operation and control of the played audio 
+it is different from play() function which actually plays a sound
+
+
+**strings**
+A String is made using single or double quotes however, in a single String the opening and closing quotes must be the same and not contain the same type of quote in the String
+
+Concatenated strings
+a string can be concatenated thus:
+apple_time = 237
+"i like eating apples {apple_time}"
+
+range(int to int) 
+
+For item in range(2,4):
+  write(item)
+
+
+**dictionaries** 
+dictionaries are made using curly braces
+dict_example = {"key1" :item1 , "key2" :int, var_key3:"str"} 
+
+num = 1
+dict_example[key{num}]:      
+   color = white
+
+a dictionary item is called using square brackets the above code is equal to 
+
+item1:
+   color = white 
+ 
+Function execute_artificial_function():
+    visit(url to webpage) 
+    play(url to item)
+    
+
+container_with_button_or_link_key:
+    style = button
+    on_click(execute_artificial_function() ) //yes functions can be nested 
+
+on_swipe_down() 
+on_swipe_left() ,e. t. c
+
+a url can also be stored as a var and then called later on
+a variables name can start with a digit (unlike python) 
+
+some borrowed key words from python and others generally 
+
+split, join
+
+While_true
+equivalent to python while True
+
+While condition:
+   action
+
+try:except: or 
+try:except(err_type) 
+
+assert()
+
+xy_collide(x, y)
+x is an container, y can be another container or a container border.
+this function returns true or false ie
+if xy_collide():
+    do something 
+
+var increase_by(int) 
+or var += 28
+both equivalent to python +=
+
+this is also similar for decreasing. 
+
+wait_sec(3) 
+tells program to delay action for some seconds
+
+arithmetic operations and comparison are almost same 
+elif is replaced by el_if
+
+updating the static page
+
+a static page is drawn. after changes are made to any of the screen containers, the main page is automatically redrawn  
+
+container:
+    all_container_keys = value
+    add functions for this container
+    add auxiliary containers to be drawn on the container 
+    
+    all auxiliary containers can be imported or just some from a module of containers
+    
+    import my_containers //imports all containers from this module//
+    from my_containers2 import circle_button, my_funct() 
+    main screen:
+        keys = vals
+ 
+it isn't necessary to space items. they can be made to rest directly (thanks to the vi tokenizer which dosent need tabs or spaces to infer anything) however tabs can be kept to increase readability. there is no automatic indentation police since code is read line by line
+Example 
+//correct// 
+hello:
+  color =  red
+  drawhide = draw
+  shape = square
+  height = 128
+  width = 72
+  position_xy = 20,20
+
+//also correct with no spacing anywhere// 
+hello:
+color =  red
+drawhide = draw
+shape = square
+height=128
+width=72
+position_xy=20,20
+
+//woukd work but is bad practice // 
+hello:
+color =  red
+   drawhide = draw
+  shape = square
+  height = 128
+  width= 72
+  positionxy = 20,20
+
+here, the container has been defined before the main. it is allowed 
+scree:
+    color =  red
+    draw_hide = draw
+    shape = square
+    height = 128
+    width = 72
+    position_xy = 20,20
+    
+main screen:                             
+  color =  green               
+  draw_hide = draw          
+  shape = circle
+  height = 1280
+  width = 720
+  position_xy = 20,20
+  containers = scree,nilo
+  
+  nilo:
+    color =  blue
+    draw_hide =hide
+    shape = square
+    height = 128
+    width = 72
+    position_xy = 40,40
+
+
+
+this is the best practice. keeping the main at the top
+
+
+main screen:                             
+  color =  green               
+  draw_hide = draw          
+  shape = circle
+  height = 1280
+  width = 720
+  position_xy = 20,20
+  containers = scree,nilo
+  
+  scree:
+    color =  red
+    draw_hide = draw
+    shape = square
+    height = 128
+    width = 72
+    position_xy = 20,20
+  nilo:
+    color =  blue
+    draw_hide =hide
+    shape = square
+    height = 128
+    width = 72
+    position_xy = 40,40
+
