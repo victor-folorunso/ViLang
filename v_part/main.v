@@ -14,7 +14,10 @@ _scree = {
   height: 128,
   width: 72,
   position_xy: [20,20],
+  repeat_by: 4,4
 }    
+
+
 
 greet_user(){
   <#
@@ -22,7 +25,8 @@ greet_user(){
   #>
 }
 
-change_color(){
+change_color(_scree,_nilo){
+  _scree.children.X1Y1: style
   _nilo.color: green
   _scree = {
     color: red,
@@ -31,7 +35,15 @@ change_color(){
 }
 
 containers = [_container1,_scree]  
-    
+
+
+for container in containers:
+  container.color = red
+  if container == _container1:
+    container = {
+      draw_hide: hide,
+    }
+
 main _screen = {                         
   color: green,              
   draw_hide: draw,         
