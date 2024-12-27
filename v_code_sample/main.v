@@ -6,6 +6,7 @@ multi line comment
 
 include lib
 from folder.subfolder include file
+include https://github.com/my_repo/code.v
 
 _scree = {
   color: red,
@@ -62,7 +63,7 @@ main _screen = {
     },
     _scree,
   ],
-  event_listner: { 
+  event_listners: { 
     on_click: greet_user(),
     on_long_press: [
       greet_uqser(),

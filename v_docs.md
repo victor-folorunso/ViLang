@@ -40,7 +40,7 @@ _screen1: {
 
 Two containers can have the same style when separated using a coma 
 
-_container1, _container2: {
+_container1, _container2 = {
   color: red,
   draw_hide:draw,
   shape: square,

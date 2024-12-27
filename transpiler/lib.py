@@ -10,14 +10,84 @@ class Format_code:
         self.functions = []
         self.containers = []
 
+        self.objects_list = []
+
     def run_format_wizard(self):
         self.include_all_files()
         self.remove_comments()
         self.extract_variables()
         self.remove_spaces()
-        self.extract_containers()
+        self.extract_containers_and_functions()
+        self.assign_container_attributes()
 
-    def extract_containers(self):
+        self.check_objects_attributes()
+
+    def check_objects_attributes(self):
+        for i in self.objects_list:
+            print(f"object {i.id}, color {i.color}")
+
+    def cleanup(self, string):
+        string = string.removeprefix("{")
+        string = string.removesuffix("}")
+       
+        return string
+
+    def assign_container_attributes(self):
+        containers = self.containers
+        for item in containers:
+            value_keys = []
+            value_values = []
+            cache = ""
+            braces = 0
+            brackets = 0
+            locks = 0
+            lock_chars = ["{", "}", "[", "]"]
+
+            blob = item.split("=", 1)
+            key = [blob[0]][0]
+            value = [blob[1]][0]
+            value = self.cleanup(value)
+
+            for char in value:
+                if char in lock_chars:
+                    if char == "{":
+                        locks += 1
+
+                    if char == "}":
+                        locks -= 1
+                            
+
+                    if char == "[":
+                        locks += 1
+                    if char == "]":
+                        locks -= 1
+
+                if locks == 0:
+                    if char == ":":
+                        value_keys.append(cache)
+                        cache = ""
+                        continue  # thiqs iqs to enqsure cache not += :
+                    if char == ",":
+                        value_values.append(cache)
+                        cache = ""
+                        continue  # thiqs iqs to enqsure cache not += ,
+
+                cache += char
+
+            assert len(value_keys) == len(value_values),"len value_keys != len value_values"
+            
+            instance = Container()
+            instance.id = key
+            i = 0
+            for valuekey in value_keys:                               #could alqso uqse value_valueqs qsince they are of qsame len
+                assert value_keys[i] in Container.default_properties, f"{value_keys[i]} is not a default attribute"
+                print(value_keys[i],value_values[i])
+                setattr(instance,value_keys[i],value_values[i])
+                i += 1
+
+            self.objects_list.append(instance)
+
+    def extract_containers_and_functions(self):
 
         cache = ""
         braces = 0
@@ -32,11 +102,12 @@ class Format_code:
                     cache = ""
 
         self.functions = [token for token in self.tokens if "){" in token]
-        self.tokens = [token for token in self.tokens if token not in self.functions] 
+        self.tokens = [token for token in self.tokens if token not in self.functions]
 
         self.containers = [token for token in self.tokens if "={" in token]
-        self.tokens = [token for token in self.tokens if token not in self.containers] 
+        self.tokens = [token for token in self.tokens if token not in self.containers]
 
+        assert self.tokens == []
 
     def extract_variables(self):
         variable_pattern = r"\b([a-zA-Z][a-zA-Z0-9_]*)\s*=\s*([^\n]+)"
@@ -78,10 +149,12 @@ class Format_code:
 
 class Container:
     default_properties = {
+        "id": "",
         "color": "red",
         "draw_hide": "default draw_hide",
         "shape": "default shape",
         "height": "default height",
+        "width": "default width",
         "event_listeners": [],
         "children": [],
         "position_xy": [20, 20],
@@ -90,10 +163,12 @@ class Container:
     def __init__(self, **kwargs):
         # Merge defaults with provided arguments
         properties = {**self.default_properties, **kwargs}
+        self.id = properties["id"]
         self.color = properties["color"]
         self.draw_hide = properties["draw_hide"]
         self.shape = properties["shape"]
         self.height = properties["height"]
+        self.width = properties["width"]
         self.event_listeners = properties["event_listeners"]
         self.children = properties["children"]
         self.position_xy = properties["position_xy"]
@@ -145,11 +220,8 @@ main _screen = {
     },
     _scree,
   ],
-  event_listner: { 
+  event_listeners: { 
     on_click: greet_user(),
-    on_long_press: [
-      greet_uqser(),
-      change_color(),
-    ],
+    
   },
 }"""
