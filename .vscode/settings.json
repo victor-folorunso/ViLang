@@ -1,0 +1,17 @@
+{
+    "dart.analysisExcludedFolders": [
+        "platform_bridge/flutter",
+        "flutter_template"
+    ],
+    "files.exclude": {
+        "platform_bridge/flutter/**": true,
+    },
+    "search.exclude": {
+        "platform_bridge/flutter/**": true,
+        "flutter_template/**": true
+    },
+    "files.watcherExclude": {
+        "platform_bridge/flutter/**": true,
+        "flutter_template/**": true
+    }
+}
