@@ -85,7 +85,7 @@ Vi compiles your code to a widget tree (JSON), then uses a Flutter runtime to re
 
 ## 📖 Learn More
 
-- **[Language Documentation](ViLang/wiki)** - Complete syntax guide and examples
+- **[Language Documentation](https://github.com/victor-folorunso/ViLang/wiki)** - Complete syntax guide and examples
 
 ---
 
