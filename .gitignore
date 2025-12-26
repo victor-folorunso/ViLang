@@ -1,0 +1,3 @@
+platform_bridge/flutter/*
+!platform_bridge/flutter/.gitkeep
+
