@@ -45,7 +45,7 @@ button:
 
 ## 📦 Installation
 
-1. **Download** `vi.exe` from [Releases](https://github.com/victor-folorunso/vi-lang/releases)
+1. **Download** `vi.exe` from [Releases](https://github.com/victor-folorunso/ViLang/releases)
 2. **Add to PATH** - Add the Vi directory to your system PATH
 3. **Done** - Vi includes its own Flutter SDK internally
 
@@ -85,7 +85,7 @@ Vi compiles your code to a widget tree (JSON), then uses a Flutter runtime to re
 
 ## 📖 Learn More
 
-- **[Language Documentation](wiki.md)** - Complete syntax guide and examples
+- **[Language Documentation](ViLang/wiki)** - Complete syntax guide and examples
 
 ---
 
