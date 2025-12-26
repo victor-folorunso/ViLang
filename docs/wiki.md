@@ -677,21 +677,8 @@ show_message():
 ```
 Memory Management
 Apps built with Vi use minimal memory. Any container not currently visible is removed from memory and will only be redrawn when needed.
-Note:This behavior is based on the language design. Some target platforms/frameworks handle this automatically.
-Project Structure
-```
-my_app/
-  lib/
-    main.v          <# Main entry point #>
-    containers.v    <# Reusable containers #>
-    functions.v     <# Utility functions #>
-  assets/
-    logo.png
-    background.jpg
-    music.mp3
-```
-Rules:
-- `main.v` must be in the `lib/` folder
+
+Project Structure Rules:
 - All asset paths are relative to project root (e.g., `\assets\logo.png`)
 - Import paths are relative to project root (e.g., `from lib\functions.v import *`)
 Building Your App
@@ -720,7 +707,8 @@ Structural Errors:
 - Missing `main` container in `main.v`
 - Circular dependencies
 Philosophy:When the compiler is uncertain about your intent, it reports an error with context rather than making assumptions. Add comments to clarify intent when needed.
-Complete Examples
+
+# Complete Examples
 Example 1: Counter App
 ```vi
 <# Data #>
@@ -1117,4 +1105,4 @@ grid:
   width = 25
   height = 25
 ```
-Vi - Where code meets intent. Everything is possible.
+Vi - Everything is possible.

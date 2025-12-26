@@ -45,7 +45,7 @@ button:
 
 ## 📦 Installation
 
-1. **Download** `vi.exe` from [Releases](https://github.com/YOUR_USERNAME/vi-lang/releases)
+1. **Download** `vi.exe` from [Releases](https://github.com/victor-folorunso/vi-lang/releases)
 2. **Add to PATH** - Add the Vi directory to your system PATH
 3. **Done** - Vi includes its own Flutter SDK internally
 
@@ -58,10 +58,10 @@ button:
 ## 🏃 Quick Start
 ```bash
 # Create new project
-vi create my_app
+create main.vi in any folder
 
 # Navigate to project
-cd my_app
+cd folder
 
 # Run on emulator
 vi run
@@ -77,7 +77,7 @@ Vi compiles your code to a widget tree (JSON), then uses a Flutter runtime to re
 
 **Benefits:**
 - Focus on describing UI, not managing boilerplate
-- Simplified syntax for common patterns
+- Simplified syntax
 - Automatic device selection and emulator management
 - Apps are generated on-the-fly from your Vi code
 
@@ -86,7 +86,6 @@ Vi compiles your code to a widget tree (JSON), then uses a Flutter runtime to re
 ## 📖 Learn More
 
 - **[Language Documentation](wiki.md)** - Complete syntax guide and examples
-- **[Examples](examples/)** - Counter, Todo app, TicTacToe game
 
 ---
 
@@ -94,9 +93,8 @@ Vi compiles your code to a widget tree (JSON), then uses a Flutter runtime to re
 
 Vi is in **early development**. Core features are working:
 
-- ✅ Vi → Flutter compilation
-- ✅ Android emulator integration
-- ✅ Cross-platform deployment
+- Vi → Flutter compilation
+- Android emulator integration
 - 🚧 iOS deployment (in progress)
 - 🚧 Web deployment (in progress)
 
@@ -105,8 +103,6 @@ Vi is in **early development**. Core features are working:
 ## Contributing
 
 Vi is open source! Contributions, bug reports, and feedback are welcome.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ---
 
