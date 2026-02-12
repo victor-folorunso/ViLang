@@ -977,10 +977,9 @@ status_panel:
   align_children = center
   children = [status_text, reset_button]
 status_text:
-  text_content = if (game_over) 
-    (if (winner == "Draw") "It's a Draw!" else "Winner: {winner}!")
-  else
-    "Current Player: {current_player}"
+  text_content = (
+    ("It's a Draw!" if (winner == "Draw") else "Winner: {winner}!") if (game_over) else "Current Player: {current_player}"
+  )
   text_content_style = [font: bold, font_size: 24, color: rgb(80, 80, 80)]
 reset_button:
   type = button

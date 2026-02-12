@@ -52,13 +52,22 @@ class MainDartInjector:
     
     def _get_runtime_code(self) -> str:
         """Get Vi runtime Dart code"""
-        # Check if template exists
-        template_path = Path.cwd() / "flutter_template" / "lib" / "main.dart"
+        # Get path relative to Vi compiler installation directory
+        # __file__ is the path to this injector.py file
+        # Use .resolve() to get absolute path regardless of CWD
+        vi_compiler_dir = Path(__file__).resolve().parent.parent  # Go up from flutter_manipulator/ to ViLang/
+        template_path = vi_compiler_dir / "flutter_template" / "lib" / "main.dart"
         
         if template_path.exists():
             return template_path.read_text()
         else:
-            raise FileNotFoundError(f"Runtime template not found at {template_path}")
+            raise FileNotFoundError(
+                f"Runtime template not found!\n\n"
+                f"Expected location: {template_path}\n"
+                f"Vi compiler directory: {vi_compiler_dir}\n"
+                f"Current working directory: {Path.cwd()}\n\n"
+                f"Please ensure the 'flutter_template' directory exists in your Vi installation."
+            )
 
 class PubspecInjector:
     """Handles pubspec.yaml manipulation"""

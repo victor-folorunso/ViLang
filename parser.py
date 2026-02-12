@@ -335,26 +335,6 @@ def parse(tokens: List[Dict]) -> Dict:
             operand = parse_unary()
             return {'type': 'unary_op', 'op': 'not', 'operand': operand}
         
-        # Handle if-first ternary: if (condition) then_value else else_value
-        if token['type'] == 'KEYWORD' and token['value'] == 'if':
-            consume()
-            skip_whitespace()
-            if peek()['type'] == 'LPAREN':
-                consume('LPAREN')
-            condition = parse_or()
-            if peek()['type'] == 'RPAREN':
-                consume('RPAREN')
-            skip_whitespace()
-            then_expr = parse_ternary()  # Parse the 'then' value (could be nested ternary)
-            skip_whitespace()
-            if peek()['type'] == 'KEYWORD' and peek()['value'] == 'else':
-                consume()
-                skip_whitespace()
-                else_expr = parse_ternary()  # Parse the 'else' value
-                return {'type': 'ternary', 'condition': condition, 'then': then_expr, 'else': else_expr}
-            else:
-                raise SyntaxError(f"Expected 'else' after if-expression at line {peek()['line']}")
-        
         if token['type'] == 'IDENTIFIER':
             consume()
             return {'type': 'var', 'name': token['value']}
@@ -1295,9 +1275,23 @@ def expand_repeat_by(name: str, container: Dict, ast: Dict) -> Dict:
             rows, cols = dimensions
             for x in range(cols):
                 for y in range(rows):
+                    instance_name = f"{name}_X{x}Y{y}"
                     instance_container = {'attributes': {**container['attributes']}, 'children_def': container.get('children_def', [])}
                     del instance_container['attributes']['repeat_by']
-                    instance_widget = generate_widget(f"{name}_X{x}Y{y}", instance_container, ast)
+                    
+                    # Fix event handlers to reference THIS instance, not the template
+                    for attr_name, attr_value in instance_container['attributes'].items():
+                        if attr_name.startswith('on_') and isinstance(attr_value, dict):
+                            if attr_value.get('type') == 'call':
+                                # Check if the function is being called with the template name as arg
+                                args = attr_value.get('args', [])
+                                if args and len(args) > 0:
+                                    first_arg = args[0]
+                                    if first_arg.get('type') == 'var' and first_arg.get('name') == name:
+                                        # Replace template reference with instance reference
+                                        attr_value['args'][0] = {'type': 'var', 'name': instance_name}
+                    
+                    instance_widget = generate_widget(instance_name, instance_container, ast)
                     instance_widget['repeat_index'] = {'x': x, 'y': y}
                     widgets.append(instance_widget)
         else:
@@ -1313,9 +1307,23 @@ def expand_repeat_by(name: str, container: Dict, ast: Dict) -> Dict:
             for x in range(cols):
                 for y in range(rows):
                     for z in range(depth):
+                        instance_name = f"{name}_X{x}Y{y}Z{z}"
                         instance_container = {'attributes': {**container['attributes']}, 'children_def': container.get('children_def', [])}
                         del instance_container['attributes']['repeat_by']
-                        instance_widget = generate_widget(f"{name}_X{x}Y{y}Z{z}", instance_container, ast)
+                        
+                        # Fix event handlers to reference THIS instance, not the template
+                        for attr_name, attr_value in instance_container['attributes'].items():
+                            if attr_name.startswith('on_') and isinstance(attr_value, dict):
+                                if attr_value.get('type') == 'call':
+                                    # Check if the function is being called with the template name as arg
+                                    args = attr_value.get('args', [])
+                                    if args and len(args) > 0:
+                                        first_arg = args[0]
+                                        if first_arg.get('type') == 'var' and first_arg.get('name') == name:
+                                            # Replace template reference with instance reference
+                                            attr_value['args'][0] = {'type': 'var', 'name': instance_name}
+                        
+                        instance_widget = generate_widget(instance_name, instance_container, ast)
                         instance_widget['repeat_index'] = {'x': x, 'y': y, 'z': z}
                         widgets.append(instance_widget)
         else:
@@ -1367,3 +1375,4 @@ class Parser:
         
         print(f"✓ Compilation complete!")
         return self.tree
+        

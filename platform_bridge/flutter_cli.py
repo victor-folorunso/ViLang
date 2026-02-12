@@ -61,7 +61,7 @@ class FlutterCLI:
         if app_dir.exists():
             print(f"{output_dir}/temp_app already exists, skipping flutter create")
             return
-        print(f"Creating Flutter project at {output_dir}/temp_app...")
+        print(f"Creating Flutter project at {output_dir}\\temp_app...")
         self.run_command(["create", "temp_app"], cwd=output_dir)
         return app_dir
 

@@ -30,6 +30,7 @@ class _ViAppState extends State<ViApp> {
   Map<String, dynamic>? compiledData;
   Map<String, dynamic> state = {};
   Map<String, Function> functions = {};
+  Map<String, Map<String, dynamic>> widgetStates = {}; // Store dynamic widget properties
 
   @override
   void initState() {
@@ -174,6 +175,36 @@ class _ViAppState extends State<ViApp> {
       case 'expr_stmt':
         evalExpression(stmt['expr']);
         break;
+      
+      case 'modify_container':
+        // Get the container name (could be a direct name or from a variable)
+        String? containerName;
+        var target = stmt['target'];
+        if (target is Map && target['type'] == 'var') {
+          // It's a variable - could be a widget name stored in state
+          var varValue = state[target['name']];
+          if (varValue is String) {
+            containerName = varValue;
+          } else {
+            containerName = target['name'];  // Assume it's the widget name directly
+          }
+        }
+        
+        if (containerName != null) {
+          // Initialize widget state if not exists
+          if (!widgetStates.containsKey(containerName)) {
+            widgetStates[containerName] = {};
+          }
+          
+          // Update the widget's attributes
+          Map<String, dynamic> attrs = stmt['attributes'] ?? {};
+          attrs.forEach((key, value) {
+            widgetStates[containerName]![key] = evalExpression(value);
+          });
+          
+          setState(() {}); // Trigger rebuild
+        }
+        break;
     }
   }
 
@@ -183,38 +214,142 @@ class _ViAppState extends State<ViApp> {
       return Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
+    // Build the root widget and wrap in SafeArea + SizedBox.expand if it uses max dimensions
+    var rootNode = compiledData!['tree'];
+    Widget rootWidget = buildWidget(rootNode);
+    
+    // Check if root uses max dimensions
+    var rootProps = rootNode['props'] ?? {};
+    var rootWidth = resolveDimension(rootProps['width']);
+    var rootHeight = resolveDimension(rootProps['height']);
+    
+    // Convert root dimensions: percentages to pixels, infinity to screen size
+    double? finalRootWidth = rootWidth;
+    double? finalRootHeight = rootHeight;
+    
+    if (rootWidth == double.infinity) {
+      finalRootWidth = MediaQuery.of(context).size.width;
+    } else if (rootWidth != null && rootWidth <= 100 && rootWidth > 0) {
+      finalRootWidth = MediaQuery.of(context).size.width * (rootWidth / 100);
+    }
+    
+    if (rootHeight == double.infinity) {
+      finalRootHeight = MediaQuery.of(context).size.height;
+    } else if (rootHeight != null && rootHeight <= 100 && rootHeight > 0) {
+      finalRootHeight = MediaQuery.of(context).size.height * (rootHeight / 100);
+    }
+    
+    // Wrap root in SizedBox if dimensions were specified
+    if (finalRootWidth != null || finalRootHeight != null) {
+      rootWidget = SizedBox(
+        width: finalRootWidth,
+        height: finalRootHeight,
+        child: rootWidget,
+      );
+    }
+
     return Scaffold(
-      body: buildWidget(compiledData!['tree']),
+      body: SafeArea(child: rootWidget),
     );
   }
 
-  Widget buildWidget(Map<String, dynamic>? node) {
+  Widget buildWidget(Map<String, dynamic>? node, {bool inFlex = false}) {
     if (node == null) return Container();
     
     String widgetType = node['widget'] ?? 'Container';
-    Map<String, dynamic> props = node['props'] ?? {};
+    String widgetName = node['name'] ?? '';
+    Map<String, dynamic> props = Map.from(node['props'] ?? {});
+    
+    // Merge dynamic widget states (from modify_container statements)
+    if (widgetStates.containsKey(widgetName)) {
+      widgetStates[widgetName]!.forEach((key, value) {
+        // Map text_content to text for runtime consistency
+        if (key == 'text_content') {
+          props['text'] = value;
+        } else {
+          props[key] = value;
+        }
+      });
+    }
     
     // Handle repeated widgets
     if (widgetType == 'Repeated') {
       List<Widget> instances = [];
+      int? gridCols;
+      
       for (var instance in node['instances']) {
-        instances.add(buildWidget(instance));
+        instances.add(buildWidget(instance, inFlex: false));
+        
+        // Try to detect grid dimensions from instance names (e.g., grid_X0Y0)
+        var instanceName = instance['name'] ?? '';
+        var match = RegExp(r'_X(\d+)Y(\d+)').firstMatch(instanceName);
+        if (match != null && gridCols == null) {
+          // Count how many Y variations exist for X0 to get row count
+          int maxX = 0;
+          for (var inst in node['instances']) {
+            var name = inst['name'] ?? '';
+            var m = RegExp(r'_X(\d+)Y(\d+)').firstMatch(name);
+            if (m != null) {
+              int x = int.parse(m.group(1)!);
+              if (x > maxX) maxX = x;
+            }
+          }
+          gridCols = maxX + 1;
+        }
       }
-      return Wrap(children: instances);
+      
+      // Use GridView if we detected grid structure, otherwise Wrap
+      if (gridCols != null && gridCols > 0) {
+        Widget gridView = GridView.count(
+          crossAxisCount: gridCols,
+          shrinkWrap: true,
+          physics: NeverScrollableScrollPhysics(),
+          childAspectRatio: 1.0, // Make cells square
+          children: instances,
+        );
+        
+        // If parent has infinity constraints, wrap in a sized container
+        // This prevents "unbounded height" errors
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            if (constraints.maxHeight == double.infinity) {
+              // Use intrinsic height to fit content
+              return IntrinsicHeight(child: gridView);
+            }
+            return gridView;
+          },
+        );
+      } else {
+        return Wrap(children: instances);
+      }
     }
     
     // Evaluate dimensions
     double? width = resolveDimension(props['width']);
     double? height = resolveDimension(props['height']);
     
+    // Check if dimensions are "max" (infinity)
+    bool widthIsMax = width == double.infinity;
+    bool heightIsMax = height == double.infinity;
+    
+    // If we're in a flex container and height is max, use Expanded instead of infinity
+    bool needsExpanded = inFlex && heightIsMax;
+    if (needsExpanded) {
+      height = null; // Expanded will handle the sizing
+    }
+    
+    // If width is max but we're not in a flex, keep it as infinity to fill parent
+    // If height is max but we're not in a flex, keep it as infinity to fill parent
+    
     // Evaluate color
     Color? color = resolveColor(props['color'], props['color_expr']);
     
     // Build children
     List<Widget> children = [];
+    bool isFlexContainer = widgetType == 'Column' || widgetType == 'Row';
     if (node['children'] != null) {
       for (var child in node['children']) {
-        children.add(buildWidget(child));
+        children.add(buildWidget(child, inFlex: isFlexContainer));
       }
     }
     
@@ -245,7 +380,20 @@ class _ViAppState extends State<ViApp> {
         break;
       
       case 'ElevatedButton':
-        String text = resolveText(props['text'], props['text_bindings']);
+        String text = '';
+        if (props['text'] is String) {
+          text = resolveText(props['text'], props['text_bindings']);
+        } else if (props['text_expr'] != null) {
+          var result = evalExpression(props['text_expr']);
+          if (result != null) {
+            text = result.toString();
+            if (text.contains('{')) {
+              text = resolveText(text, null);
+            }
+          } else {
+            text = '';
+          }
+        }
         widget = ElevatedButton(
           onPressed: props['events']?['on_click'] != null 
             ? () => handleEvent(props['events']['on_click'])
@@ -264,20 +412,107 @@ class _ViAppState extends State<ViApp> {
       
       default:
         // Container
-        widget = children.isEmpty 
-          ? Container() 
-          : (children.length == 1 ? children[0] : Column(children: children));
+        Widget? contentWidget;
+        
+        // Check if there's text_content
+        if (props['text'] != null || props['text_expr'] != null) {
+          String text = '';
+          if (props['text'] is String) {
+            text = resolveText(props['text'], props['text_bindings']);
+          } else if (props['text_expr'] != null) {
+            var result = evalExpression(props['text_expr']);
+            if (result != null) {
+              // If result is a string with interpolation, resolve it
+              text = result.toString();
+              if (text.contains('{')) {
+                text = resolveText(text, null);
+              }
+            } else {
+              text = '';
+            }
+          }
+          
+          // Apply text styling if provided
+          TextStyle? textStyle;
+          if (props['text_content_style'] != null) {
+            // TODO: Parse text_content_style array
+          }
+          
+          contentWidget = Text(text, style: textStyle);
+        } else if (children.isNotEmpty) {
+          contentWidget = children.length == 1 ? children[0] : Column(children: children);
+        }
+        
+        widget = contentWidget ?? Container();
         break;
+    }
+    
+    // Add gesture detection for on_click events
+    if (props['events']?['on_click'] != null && widgetType != 'ElevatedButton') {
+      widget = GestureDetector(
+        onTap: () => handleEvent(props['events']['on_click']),
+        child: widget,
+      );
     }
     
     // Wrap in Container if we have dimensions or color
     if (width != null || height != null || color != null) {
-      widget = Container(
-        width: width,
-        height: height,
-        color: color,
-        child: widget,
-      );
+      // Use LayoutBuilder to convert Vi percentages (0-100) to pixels
+      // Also handles infinity (max) dimensions
+      // But skip if Expanded will be used (needsExpanded)
+      if (!needsExpanded && ((width != null && width <= 100 && width > 0) || 
+          (height != null && height <= 100 && height > 0) ||
+          width == double.infinity || height == double.infinity)) {
+        widget = LayoutBuilder(
+          builder: (context, constraints) {
+            double? finalWidth = width;
+            double? finalHeight = height;
+            
+            // Convert percentages to actual pixels
+            if (width != null && width != double.infinity && width <= 100) {
+              finalWidth = constraints.maxWidth * (width / 100);
+            } else if (width == double.infinity) {
+              finalWidth = constraints.maxWidth;
+            }
+            
+            if (height != null && height != double.infinity && height <= 100) {
+              finalHeight = constraints.maxHeight * (height / 100);
+            } else if (height == double.infinity) {
+              finalHeight = constraints.maxHeight;
+            }
+            
+            return Container(
+              width: finalWidth,
+              height: finalHeight,
+              color: color,
+              alignment: Alignment.center,
+              child: widget,
+            );
+          },
+        );
+      } else {
+        // Dimensions are already in pixels
+        widget = Container(
+          width: width,
+          height: height,
+          color: color,
+          alignment: Alignment.center,
+          child: widget,
+        );
+      }
+    }
+    
+    // Wrap in Expanded if needed (for max dimensions inside flex containers)
+    if (needsExpanded) {
+      // If there's color but no container yet, wrap in one
+      if (color != null && !(widget is Container)) {
+        widget = Container(
+          color: color,
+          alignment: Alignment.center,
+          child: widget,
+        );
+      }
+      widget = Expanded(child: widget);
     }
     
     return widget;
@@ -291,6 +526,7 @@ class _ViAppState extends State<ViApp> {
     
     switch (type) {
       case 'fixed':
+        // Vi uses 0-100 range for percentages, need to convert based on screen
         return (dimData['value'] as num).toDouble();
       case 'infinity':
         return double.infinity;
@@ -326,6 +562,16 @@ class _ViAppState extends State<ViApp> {
           result = result.replaceAll('{$varName}', state[varName].toString());
         }
       }
+    } else {
+      // Also handle direct variable interpolation
+      final regex = RegExp(r'\{([^}]+)\}');
+      result = result.replaceAllMapped(regex, (match) {
+        String varName = match.group(1)!;
+        if (state.containsKey(varName)) {
+          return state[varName].toString();
+        }
+        return match.group(0)!;
+      });
     }
     
     return result;
