@@ -1,0 +1,141 @@
+<# TicTacToe - Vi Language Game #>
+<# Data #>
+current_player = "X"
+game_over = false
+winner = ""
+<# Main App #>
+main main_screen:
+  color = rgb(240, 240, 250)
+  height = max
+  width = max
+  children = [header, game_container, footer]
+header:
+  height = 15
+  width = max
+  color = rgb(100, 100, 200)
+  align_children = center
+  children = [title]
+title:
+  text_content = "TicTacToe"
+  text_content_style = [font: bold, font_size: 32, color: white]
+game_container:
+  height = max
+  width = max
+  align_children = center
+  children = [game_board, status_panel]
+game_board:
+  width = 60
+  height = 60
+  align_self = center
+  color = white
+  shape = sqircle
+  children_padding = 4
+  children = [grid]
+grid:
+  width = max
+  height = max
+  repeat_by = 3, 3
+  children_padding = 2
+  width = 18
+  height = 18
+  color = rgb(230, 230, 240)
+  shape = sqircle
+  align_children = center
+  text_content = ""
+  text_content_style = [font: bold, font_size: 48]
+  on_click: make_move(grid)
+<# Functions #>
+make_move(cell):
+  if (not game_over and cell.text_content == ""):
+    cell:
+      text_content = current_player
+      text_content_style = [
+        font: bold, 
+        font_size: 48, 
+        color: rgb(100, 150, 250) if (current_player == "X") else rgb(250, 100, 100)
+      ]
+    check_winner()
+    if (not game_over):
+      current_player = "O" if (current_player == "X") else "X"
+check_winner():
+  <# Store all cell values #>
+  A = grid.X0Y0.text_content
+  B = grid.X1Y0.text_content
+  C = grid.X2Y0.text_content
+  D = grid.X0Y1.text_content
+  E = grid.X1Y1.text_content
+  F = grid.X2Y1.text_content
+  G = grid.X0Y2.text_content
+  H = grid.X1Y2.text_content
+  I = grid.X2Y2.text_content
+  <# Check rows #>
+  if (A == B and B == C and A != ""):
+    winner = A
+    game_over = true
+  if (D == E and E == F and D != ""):
+    winner = D
+    game_over = true
+  if (G == H and H == I and G != ""):
+    winner = G
+    game_over = true
+  <# Check columns #>
+  if (A == D and D == G and A != ""):
+    winner = A
+    game_over = true
+  if (B == E and E == H and B != ""):
+    winner = B
+    game_over = true
+  if (C == F and F == I and C != ""):
+    winner = C
+    game_over = true
+  <# Check diagonals #>
+  if (A == E and E == I and A != ""):
+    winner = A
+    game_over = true
+  if (C == E and E == G and C != ""):
+    winner = C
+    game_over = true
+  <# Check for draw #>
+  all_filled = true
+  for cell in grid.children:
+    if (cell.text_content == ""):
+      all_filled = false
+  if (all_filled and not game_over):
+    game_over = true
+    winner = "Draw"
+reset_game():
+  for cell in grid.children:
+    cell:
+      text_content = ""
+  current_player = "X"
+  game_over = false
+  winner = ""
+status_panel:
+  width = 60
+  height = 20
+  align_self = center
+  align_children = center
+  children = [status_text, reset_button]
+status_text:
+  text_content = (
+    ("It's a Draw!" if (winner == "Draw") else "Winner: {winner}!") if (game_over) else "Current Player: {current_player}"
+  )
+  text_content_style = [font: bold, font_size: 24, color: rgb(80, 80, 80)]
+reset_button:
+  type = button
+  width = 30
+  height = 8
+  color = rgb(100, 200, 100)
+  shape = sqircle
+  text_content = "New Game"
+  text_content_style = [font: bold, font_size: 18, color: white]
+  on_click: reset_game()
+footer:
+  height = 10
+  width = max
+  color = rgb(220, 220, 230)
+  align_children = center
+  children = [footer_text]
+footer_text:
+  text_content = "Made with Vi Language"
+  text_content_style = [font_size: 14, color: rgb(100, 100, 100)]

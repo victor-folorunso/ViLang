@@ -458,8 +458,9 @@ footer:
   color = gray
 ```
 Scope Rules:
-- Containers defined inline within `children` arrays are locally scopedto that parent
-- They cannot be accessed by sibling containers or containers outside the parent
+- Containers defined inline within `children` arrays are locally scoped to that parent
+- They can be accessed by sibling containers (containers at the same indent level within the same parent)
+- They cannot be directly accessed by containers outside the parent hierarchy
 - To access a locally scoped container from outside, reference it through its public parent: `parent_name.child_name`
 - Containers defined at the top level (not nested) are globally accessible
 Behavior
@@ -645,8 +646,8 @@ parent:
     color = red
 ```
 Key Points:
-- Locally scoped containers cannot be directly accessed by sibling containers
-- They can be accessed by other children of the same parent
+- Locally scoped containers can be directly accessed by sibling containers (same indent level within the same parent)
+- They cannot be directly accessed by containers in a different scope (different parent or indent level)
 - They can be accessed from outside via: `parent.local_child`
 Global Scope
 Top-level containers and functions are globally accessible:

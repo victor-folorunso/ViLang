@@ -24,9 +24,9 @@ class Executor:
     # Project operations
     # -------------------------
 
-    def create_project(self, output_dir: Path):
+    def create_project(self, output_dir: Path, project_name: str = "temp_app"):
         """Create new Flutter project"""
-        app_dir =self.flutter.create_project(output_dir)
+        app_dir = self.flutter.create_project(output_dir)
         return app_dir
 
     def pub_get(self, project_dir: Path):
@@ -40,6 +40,11 @@ class Executor:
     def build_ios(self, project_dir: Path):
         """Build iOS app"""
         self.flutter.build_ios(project_dir)
+    
+    def build_web(self, project_dir: Path):
+        """Build web app"""
+        print("Building web app...")
+        self.flutter.run_command(["build", "web"], cwd=project_dir)
 
     # -------------------------
     # Device queries
@@ -99,7 +104,7 @@ class Executor:
     # Run operations
     # -------------------------
 
-    def run_app_interactive(self, project_dir: Path):
+    def run_app_interactive(self, project_dir: Path, return_process: bool = False):
         """
         Run Flutter app with interactive device selection.
         Shows running devices and offline AVDs, lets user pick.
@@ -160,7 +165,7 @@ class Executor:
             # Run on existing device
             device = option_data
             print(f"\nRunning on {device.name}...")
-            self.flutter.run_on_device(project_dir, device.id)
+            return self.flutter.run_on_device(project_dir, device.id, return_process=return_process)
         
         elif option_type == 'avd':
             # Start AVD and run
@@ -168,7 +173,7 @@ class Executor:
             print(f"\nStarting {avd_name}...")
             self.android.start_avd(avd_name, wait=True)
             print(f"Running app on {avd_name}...")
-            self.flutter.run_on_device(project_dir)
+            return self.flutter.run_on_device(project_dir, return_process=return_process)
 
     def run_app(self, project_dir: Path, target: str | None = None, avd: str | None = None):
         """
@@ -209,5 +214,5 @@ class Executor:
         raise RuntimeError(
             "No device/emulator running.\n"
             f"Available AVDs: {avds}\n"
-            "Start one manually or use: executor.run_app(project_dir, avd='<name>')"
+            "Start one manually or use: executor.run_app(project_dir, avd='<n>')"
         )

@@ -60,7 +60,7 @@ class FlutterCLI:
         """Create new Flutter project"""
         if app_dir.exists():
             print(f"{output_dir}/temp_app already exists, skipping flutter create")
-            return
+            return app_dir
         print(f"Creating Flutter project at {output_dir}\\temp_app...")
         self.run_command(["create", "temp_app"], cwd=output_dir)
         return app_dir
@@ -80,12 +80,28 @@ class FlutterCLI:
         print("Building iOS app...")
         self.run_command(["build", "ios"], cwd=project_dir)
 
-    def run_on_device(self, project_dir: Path, device_id: str | None = None):
+    def run_on_device(self, project_dir: Path, device_id: str | None = None, return_process: bool = False):
         """Run Flutter app on specified device"""
         cmd = ["run"]
         if device_id:
             cmd.extend(["-d", device_id])
-        self.run_command(cmd, cwd=project_dir)
+        
+        if return_process:
+            cmd_list = [str(self.config.flutter_bin)] + [str(x) for x in cmd]
+            process = subprocess.Popen(
+                cmd_list,
+                cwd=str(project_dir),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                bufsize=1
+            )
+            return process
+        else:
+            self.run_command(cmd, cwd=project_dir)
 
     def list_devices(self) -> list[str]:
         """Get raw device list from flutter devices"""

@@ -1,0 +1,74 @@
+BUGS FIXED - TicTacToe Transpiler Issues
+=========================================
+
+## Issue 1: Reset Button Not Working
+**Problem:** Reset button was generating as a plain Text widget instead of ElevatedButton
+**Root Cause:** The generate_button_widget() method wasn't wrapping the button with styling props (width, height, color, shape)
+**Fix:** Added `wrap_with_props()` call to apply container styling to buttons
+
+**Code Changed:**
+```python
+# OLD:
+def generate_button_widget(self, name, container, indent):
+    ...
+    return f"ElevatedButton(...)"
+
+# NEW:
+def generate_button_widget(self, name, container, indent):
+    ...
+    button = f"ElevatedButton(...)"
+    return self.wrap_with_props(button, name, attrs, indent)
+```
+
+## Issue 2: Dynamic Text Colors Not Applied
+**Problem:** Grid cells always showed same color style, ignoring dynamic colors stored in state
+**Root Cause:** 
+1. text_content_style was stored as raw array `[null, null, null]` instead of TextStyle
+2. Cell widget generation ignored the state list and used template style only
+
+**Fix Applied:**
+1. Changed state list type from `List<dynamic>` to `List<TextStyle?>` 
+2. Added `_generate_text_style_from_expr()` to convert kvpair arrays to TextStyle objects
+3. Updated `generate_cell_widget()` to read from state list when text_content_style is tracked
+4. Applied TextStyle conversion in all 3 modification contexts:
+   - Function param cell modifications
+   - For-loop cell modifications  
+   - Direct member access (grid.X0Y0)
+
+**Code Changes:**
+```python
+# State list type updated:
+def _list_elem_type(self, prop):
+    return {..., 'text_content_style': 'TextStyle?'}.get(prop, 'dynamic')
+
+# New helper method:
+def _generate_text_style_from_expr(self, style_expr):
+    """Convert text_content_style array to TextStyle(...)"""
+    parts = []
+    for kvpair in style_expr.elements:
+        if key == 'color':
+            parts.append(f'color: {self.resolve_color(val)}')
+        # ... handle font, font_size
+    return f"TextStyle({', '.join(parts)})"
+
+# Applied in modifications:
+if attr == 'text_content_style' and val_expr.get('type') == 'array':
+    val = self._generate_text_style_from_expr(val_expr)
+else:
+    val = self.generate_expr(val_expr)
+
+# Used in cell rendering:
+if has_state and 'text_content_style' in self.modified_containers[container_name]:
+    style = f"{container_name}_text_content_style[index]"
+else:
+    style = self.generate_text_style(attrs)
+```
+
+## Expected Results
+After these fixes, the TicTacToe game should:
+1. ✅ Have a clickable "New Game" button with proper styling
+2. ✅ Show X's in blue and O's in red (dynamic colors applied correctly)
+3. ✅ All grid cell text content updates work properly
+
+## Testing
+Run `vi run` on test.vi to verify the fixes work correctly.

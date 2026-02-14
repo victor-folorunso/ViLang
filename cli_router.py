@@ -4,19 +4,24 @@ from runtime import Runtime
 from compiler import Compiler
 
 class Vi:
-    """Main entry for CLI"""
+    """Main entry for Vi CLI"""
+    
     def __init__(self):
         self.filepath = Path.cwd() / "main.vi"
-        self.tree = None
+        self.ast = None
 
-    def run(self):
+    def run(self, hot_reload=False):
+        """Run Vi app on emulator"""
         parser = Parser(self.filepath)
-        self.tree = parser.parse()
-        runtime = Runtime(self.tree)
-        runtime.run()
+        self.ast = parser.parse()
+        
+        runtime = Runtime(self.ast, vi_file=self.filepath)
+        runtime.run(hot_reload=hot_reload)
 
     def create(self, target):
+        """Compile Vi app for target platform"""
         parser = Parser(self.filepath)
-        self.tree = parser.parse()
-        compiler = Compiler(self.tree, target)
+        self.ast = parser.parse()
+        
+        compiler = Compiler(self.ast, target)
         compiler.create()
