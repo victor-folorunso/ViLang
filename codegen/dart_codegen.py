@@ -75,6 +75,21 @@ class DartCodegen:
         for fname, fnode in self.ast['functions'].items():
             scan(fnode['body'], fname)
 
+        # 4. Build call graph — functions called by other functions should not wrap in setState
+        self.called_by_functions = set()
+        def find_calls(stmts, current_fname):
+            for stmt in stmts:
+                if stmt.get('type') == 'expr_stmt':
+                    expr = stmt.get('expr', {})
+                    if expr.get('type') == 'call':
+                        fname = expr.get('function', {}).get('name')
+                        if fname and fname in self.ast['functions'] and fname != current_fname:
+                            self.called_by_functions.add(fname)
+                for key in ('then', 'else', 'body'):
+                    find_calls(stmt.get(key, []), current_fname)
+        for fname, fnode in self.ast['functions'].items():
+            find_calls(fnode['body'], fname)
+
     def _base_name(self, expr):
         """Walk member-access chain to get the root var name"""
         while expr.get('type') == 'member':
@@ -183,11 +198,12 @@ class DartCodegen:
         param_str = ", ".join(param_strs)
 
         has_state = self._has_state_changes(func_node['body'])
+        is_internal = func_name in self.called_by_functions
         is_async = self._has_async_calls(func_node['body'])
         func_type = "Future<void>" if is_async else "void"
 
         lines.append(f"  {func_type} {func_name}({param_str}) {'async ' if is_async else ''}{{")
-        if has_state:
+        if has_state and not is_internal:
             lines.append("    setState(() {")
             for stmt in func_node['body']:
                 lines.extend(self.generate_statement(stmt, indent=3))
@@ -539,10 +555,17 @@ class DartCodegen:
         attrs = container['attributes']
         if 'type' in attrs:
             tv = attrs['type']
+            # Handle both literal strings and var names for type
+            type_value = None
             if tv.get('type') == 'literal':
+                type_value = tv['value']
+            elif tv.get('type') == 'var':
+                type_value = tv['name']
+            
+            if type_value:
                 m = {'button': 'ElevatedButton', 'input': 'TextField'}
-                if tv['value'] in m:
-                    return m[tv['value']]
+                if type_value in m:
+                    return m[type_value]
         if 'scrollable' in attrs:
             sv = attrs['scrollable']
             if sv.get('type') == 'literal' and sv.get('value'):
@@ -562,11 +585,23 @@ class DartCodegen:
         ind, ind2 = "  " * indent, "  " * (indent + 1)
         main_ax, cross_ax = self._column_alignment(attrs.get('align_children'))
 
+        def _is_max_height(cc):
+            h = cc.get('attributes', {}).get('height')
+            if not h:
+                return False
+            return (h.get('type') == 'var' and h.get('name') == 'max') or \
+                   (h.get('type') == 'literal' and h.get('value') == 'max')
+
+        has_expanded_child = any(_is_max_height(cc) for _, cc in children)
+        main_size = "MainAxisSize.max" if has_expanded_child else "MainAxisSize.min"
+
         widget = (f"Column(\n{ind2}mainAxisAlignment: {main_ax},\n"
                   f"{ind2}crossAxisAlignment: {cross_ax},\n"
-                  f"{ind2}mainAxisSize: MainAxisSize.min,\n{ind2}children: [\n")
+                  f"{ind2}mainAxisSize: {main_size},\n{ind2}children: [\n")
         for i, (cn, cc) in enumerate(children):
             cw = self.generate_widget(cn, cc, indent + 1)
+            if _is_max_height(cc):
+                cw = f"Expanded(\n{ind2}  child: {cw},\n{ind2})"
             widget += f"{ind2}  {cw}"
             if i < len(children) - 1:
                 widget += ","
@@ -634,7 +669,12 @@ class DartCodegen:
                 size = val.get('value', 14) if val.get('type') == 'literal' else self.generate_expr(val)
                 parts.append(f'fontSize: {float(size) if isinstance(size, (int, float)) else size}')
             elif key == 'color':
-                c = self.resolve_color(val)
+                # Handle color - could be simple value or ternary expression
+                if val.get('type') == 'ternary':
+                    # For ternary, generate the full expression
+                    c = self.generate_expr(val)
+                else:
+                    c = self.resolve_color(val)
                 if c:
                     parts.append(f'color: {c}')
         return f"TextStyle({', '.join(parts)})" if parts else None
@@ -642,11 +682,48 @@ class DartCodegen:
     def generate_button_widget(self, name, container, indent):
         attrs = container['attributes']
         text_str = self.generate_expr(attrs.get('text_content')) if 'text_content' in attrs else '"Button"'
+        style = self.generate_text_style(attrs)
+        text_widget = f"Text({text_str}{', style: ' + style if style else ''})"
         on_click = attrs.get('on_click')
         on_press = f"() => {self.generate_expr(on_click)}" if on_click else "null"
         ind, ind2 = "  " * indent, "  " * (indent + 1)
-        button = f"ElevatedButton(\n{ind2}onPressed: {on_press},\n{ind2}child: Text({text_str}),\n{ind})"
-        return self.wrap_with_props(button, name, attrs, indent)
+
+        # Build ElevatedButton.styleFrom so color/shape render correctly
+        btn_style_parts = []
+        color = self.resolve_color(attrs.get('color'))
+        if color:
+            btn_style_parts.append(f"backgroundColor: {color}")
+        shape = attrs.get('shape')
+        if shape and shape.get('type') == 'var':
+            sname = shape['name']
+            if sname == 'sqircle':
+                btn_style_parts.append("shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))")
+            elif sname == 'circle':
+                btn_style_parts.append("shape: const CircleBorder()")
+        w = self.resolve_dimension(attrs.get('width'))
+        h = self.resolve_dimension(attrs.get('height'))
+        if w and h:
+            btn_style_parts.append(f"minimumSize: Size({w}, {h})")
+            btn_style_parts.append(f"maximumSize: Size({w}, {h})")
+
+        style_str = f"ElevatedButton.styleFrom({', '.join(btn_style_parts)})" if btn_style_parts else None
+        button = f"ElevatedButton(\n{ind2}onPressed: {on_press},\n"
+        if style_str:
+            button += f"{ind2}style: {style_str},\n"
+        button += f"{ind2}child: {text_widget},\n{ind})"
+
+        # Apply alignment only (skip Container wrapping — color/shape already on button)
+        align_self = attrs.get('align_self')
+        if align_self:
+            alignment = self._resolve_align_self(align_self)
+            if alignment:
+                button = f"Align(\n{ind2}alignment: {alignment},\n{ind2}child: {button},\n{ind})"
+        margin = attrs.get('margin')
+        if margin:
+            margin_val = self._resolve_margin(margin)
+            if margin_val:
+                button = f"Padding(\n{ind2}padding: {margin_val},\n{ind2}child: {button},\n{ind})"
+        return button
 
     def generate_textfield_widget(self, name, container, indent):
         attrs = container['attributes']

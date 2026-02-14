@@ -52,7 +52,7 @@ class ViFileHandler(FileSystemEventHandler):
             
             # Trigger Flutter hot reload by sending 'r' to the process
             if self.flutter_process and self.flutter_process.poll() is None:
-                self.flutter_process.stdin.write(b'r\n')
+                self.flutter_process.stdin.write('r\n')
                 self.flutter_process.stdin.flush()
                 print("✓ Hot reload triggered")
             

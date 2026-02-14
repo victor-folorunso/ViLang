@@ -138,4 +138,4 @@ footer:
   children = [footer_text]
 footer_text:
   text_content = "Made with Vi Language"
-  text_content_style = [font_size: 14, color: rgb(100, 100, 100)]
+  text_content_style = [font_size: 14, color: rgb(218, 32, 32)]

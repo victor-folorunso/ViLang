@@ -5,11 +5,11 @@ from parser import Parser
 from codegen.dart_codegen import DartCodegen
 
 print("=" * 80)
-print("TESTING COUNTER APP (Simple)")
+print("TESTING tictactoe APP")
 print("=" * 80)
 
 # Parse test file
-parser = Parser("test.vi")
+parser = Parser("main.vi")
 ast = parser.parse()
 
 # Generate Dart code directly from AST
