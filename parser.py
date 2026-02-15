@@ -1,10 +1,13 @@
 """
-Vi Language Parser - Enhanced with comma-separated containers
+Vi Language Parser - Enhanced
 Parses .vi files into Abstract Syntax Tree
+Features: nested functions, URL imports, implicit arrays, 'to' syntax
 """
 
 import os
 import re
+import urllib.request
+import tempfile
 from typing import List, Dict, Any, Optional, Set, Tuple
 
 
@@ -19,22 +22,39 @@ def remove_comments_with_lines(text: str) -> Tuple[str, Dict[int, int]]:
     line_map = {}
     
     i = 0
+    in_comment = False
+    
     while i < len(lines):
         line = lines[i]
-        cleaned = re.sub(r'<#.*?#>', '', line)
+        cleaned = []
+        j = 0
         
-        if '<#' in line and '#>' not in line:
-            j = i + 1
-            while j < len(lines) and '#>' not in lines[j]:
-                j += 1
-            for k in range(i, min(j + 1, len(lines))):
-                stripped_lines.append('')
-                line_map[len(stripped_lines)] = k + 1
-            i = j + 1
-        else:
-            stripped_lines.append(cleaned)
-            line_map[len(stripped_lines)] = i + 1
-            i += 1
+        while j < len(line):
+            if in_comment:
+                # Look for comment end
+                if j + 1 < len(line) and line[j:j+2] == '#>':
+                    in_comment = False
+                    j += 2
+                else:
+                    j += 1
+            else:
+                # Look for comment start
+                if j + 1 < len(line) and line[j:j+2] == '<#':
+                    in_comment = True
+                    # Check if comment ends on same line
+                    end_pos = line.find('#>', j + 2)
+                    if end_pos != -1:
+                        in_comment = False
+                        j = end_pos + 2
+                    else:
+                        j += 2
+                else:
+                    cleaned.append(line[j])
+                    j += 1
+        
+        stripped_lines.append(''.join(cleaned) if not in_comment else '')
+        line_map[len(stripped_lines)] = i + 1
+        i += 1
     
     return '\n'.join(stripped_lines), line_map
 
@@ -45,7 +65,7 @@ def tokenize(source: str) -> List[Dict[str, Any]]:
     tokens = []
     lines = source.split('\n')
     indent_stack = [0]
-    keywords = {'main', 'from', 'import', 'if', 'else', 'for', 'in', 'while', 'return', 'true', 'false', 'and', 'or', 'not', 'all', 'range'}
+    keywords = {'main', 'from', 'import', 'if', 'else', 'for', 'in', 'while', 'return', 'true', 'false', 'and', 'or', 'not', 'all', 'range', 'to'}
     
     for line_num, line in enumerate(lines, 1):
         original_line = line_map.get(line_num, line_num)
@@ -158,7 +178,6 @@ def tokenize(source: str) -> List[Dict[str, Any]]:
     tokens.append({'type': 'EOF', 'value': None, 'line': last_line, 'col': 0})
     return tokens
 
-
 # ============================================================================
 # PARSER - Builds AST with full control flow
 # ============================================================================
@@ -174,7 +193,19 @@ def parse(tokens: List[Dict]) -> Dict:
     def consume(expected_type=None):
         token = peek()
         if expected_type and token['type'] != expected_type:
-            raise SyntaxError(f"Expected {expected_type}, got {token['type']} at line {token['line']}")
+            # Build context for better error messages
+            context = []
+            for i in range(-2, 3):
+                idx = pos[0] + i
+                if 0 <= idx < len(tokens):
+                    marker = ' >>> ' if i == 0 else '     '
+                    t = tokens[idx]
+                    context.append(f"{marker}Line {t['line']}: {t['type']} = {t.get('value', '')}")
+            context_str = '\n'.join(context)
+            raise SyntaxError(
+                f"Expected {expected_type}, got {token['type']} at line {token['line']}\n"
+                f"\nContext:\n{context_str}"
+            )
         pos[0] += 1
         return token
     
@@ -366,8 +397,56 @@ def parse(tokens: List[Dict]) -> Dict:
         raise SyntaxError(f"Unexpected token {token['type']} at line {token['line']}\n\nContext:\n{context_str}")
     
     def parse_statement():
-        """Parse a statement - full control flow support"""
+        """Parse a statement - full control flow support including nested functions"""
         token = peek()
+        
+        # Nested function definition: name(params):
+        if token['type'] == 'IDENTIFIER' and peek(1)['type'] == 'LPAREN':
+            # Check if this is a function call or definition
+            # Definition has COLON after RPAREN, call doesn't
+            saved_pos = pos[0]
+            consume('IDENTIFIER')
+            consume('LPAREN')
+            paren_depth = 1
+            while paren_depth > 0 and peek()['type'] != 'EOF':
+                if peek()['type'] == 'LPAREN':
+                    paren_depth += 1
+                elif peek()['type'] == 'RPAREN':
+                    paren_depth -= 1
+                consume()
+            
+            is_func_def = peek()['type'] == 'COLON'
+            pos[0] = saved_pos
+            
+            if is_func_def:
+                # Parse nested function definition
+                fname = consume('IDENTIFIER')['value']
+                consume('LPAREN')
+                params = []
+                while peek()['type'] != 'RPAREN':
+                    if peek()['type'] != 'IDENTIFIER':
+                        raise SyntaxError(f"Function '{fname}' expects parameter names")
+                    params.append(consume('IDENTIFIER')['value'])
+                    if peek()['type'] == 'COMMA':
+                        consume()
+                consume('RPAREN')
+                consume('COLON')
+                skip_newlines()
+                
+                if peek()['type'] != 'INDENT':
+                    func_body = []
+                else:
+                    consume('INDENT')
+                    func_body = []
+                    while peek()['type'] not in ['DEDENT', 'EOF']:
+                        if peek()['type'] == 'NEWLINE':
+                            skip_newlines()
+                            continue
+                        func_body.append(parse_statement())
+                        skip_newlines()
+                    consume('DEDENT')
+                
+                return {'type': 'function_def', 'name': fname, 'params': params, 'body': func_body}
         
         # Return statement
         if token['type'] == 'KEYWORD' and token['value'] == 'return':
@@ -489,7 +568,16 @@ def parse(tokens: List[Dict]) -> Dict:
         target_expr = parse_expression()
         if peek()['type'] == 'ASSIGN':
             consume()
+            # Check for implicit array: a = 1, 2, 3 (no brackets)
             value_expr = parse_expression()
+            # If next token is comma and not in brackets/parens, create array
+            if peek()['type'] == 'COMMA':
+                elements = [value_expr]
+                while peek()['type'] == 'COMMA':
+                    consume()
+                    skip_newlines()
+                    elements.append(parse_expression())
+                value_expr = {'type': 'array', 'elements': elements}
             return {'type': 'assign', 'target': target_expr, 'value': value_expr}
         else:
             return {'type': 'expr_stmt', 'expr': target_expr}
@@ -517,7 +605,15 @@ def parse(tokens: List[Dict]) -> Dict:
                 if peek()['type'] == 'ASSIGN':
                     consume('ASSIGN')
                     first_val = parse_expression()
-                    if peek()['type'] == 'COMMA':
+                    
+                    # Check for "X to Y" syntax for ranges
+                    if peek()['type'] == 'KEYWORD' and peek()['value'] == 'to':
+                        consume()  # consume 'to'
+                        second_val = parse_expression()
+                        # Create array [X, Y]
+                        attr_value = {'type': 'array', 'elements': [first_val, second_val]}
+                    elif peek()['type'] == 'COMMA':
+                        # Implicit array: attr = val1, val2, val3
                         elements = [first_val]
                         while peek()['type'] == 'COMMA':
                             consume('COMMA')
@@ -526,6 +622,7 @@ def parse(tokens: List[Dict]) -> Dict:
                         attr_value = {'type': 'array', 'elements': elements}
                     else:
                         attr_value = first_val
+                    
                     container['attributes'][attr_name] = attr_value
                     skip_newlines()
                 
@@ -571,8 +668,14 @@ def parse(tokens: List[Dict]) -> Dict:
         # Handle imports
         if token['type'] == 'KEYWORD' and token['value'] == 'from':
             consume()
-            path = consume('STRING')
-            consume('KEYWORD')
+            path_token = peek()
+            if path_token['type'] == 'STRING':
+                path = consume('STRING')['value']
+            else:
+                # Allow identifier for URL imports
+                path = consume('IDENTIFIER')['value']
+            
+            consume('KEYWORD')  # 'import'
             items = []
             if peek()['type'] == 'MULTIPLY':
                 consume()
@@ -583,13 +686,18 @@ def parse(tokens: List[Dict]) -> Dict:
                     if peek()['type'] != 'COMMA':
                         break
                     consume()
-            ast['imports'].append({'source': path['value'], 'items': items})
+            ast['imports'].append({'source': path, 'items': items})
             skip_newlines()
         
         elif token['type'] == 'KEYWORD' and token['value'] == 'import':
             consume()
-            path = consume('STRING')
-            ast['imports'].append({'source': path['value'], 'items': '*'})
+            path_token = peek()
+            if path_token['type'] == 'STRING':
+                path = consume('STRING')['value']
+            else:
+                # Allow identifier for URL imports
+                path = consume('IDENTIFIER')['value']
+            ast['imports'].append({'source': path, 'items': '*'})
             skip_newlines()
         
         # Handle variable assignment
@@ -599,6 +707,14 @@ def parse(tokens: List[Dict]) -> Dict:
             if peek()['type'] == 'ASSIGN':
                 consume()
                 value = parse_expression()
+                # Check for implicit array
+                if peek()['type'] == 'COMMA':
+                    elements = [value]
+                    while peek()['type'] == 'COMMA':
+                        consume()
+                        skip_newlines()
+                        elements.append(parse_expression())
+                    value = {'type': 'array', 'elements': elements}
                 ast['variables'][name] = {'value': value}
                 skip_newlines()
             
@@ -689,7 +805,7 @@ def parse(tokens: List[Dict]) -> Dict:
 # ============================================================================
 
 def resolve_imports(ast: Dict, base_path: str) -> Dict:
-    """Resolve imports and merge ASTs"""
+    """Resolve imports and merge ASTs - supports file paths and URLs"""
     if not ast['imports']:
         return ast
     
@@ -697,36 +813,150 @@ def resolve_imports(ast: Dict, base_path: str) -> Dict:
         source = import_node['source']
         items = import_node['items']
         
-        file_path = source.replace('\\', os.sep)
-        if not os.path.isabs(file_path):
-            file_path = os.path.join(base_path, file_path)
+        # Check if source is a URL
+        is_url = source.startswith('http://') or source.startswith('https://')
+        
+        if is_url:
+            # Download from URL
+            try:
+                response = urllib.request.urlopen(source)
+                code = response.read().decode('utf-8')
+                file_path = None  # No local file path for URLs
+            except Exception as e:
+                raise ImportError(f"Cannot import from URL '{source}': {e}")
+        else:
+            # Local file path
+            file_path = source.replace('\\', os.sep)
+            if not os.path.isabs(file_path):
+                file_path = os.path.join(base_path, file_path)
+            
+            if not os.path.exists(file_path):
+                raise ImportError(f"Cannot import '{source}': File not found at {file_path}")
+            
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    code = f.read()
+            except Exception as e:
+                raise ImportError(f"Cannot import '{source}': {e}")
         
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                code = f.read()
-            
             tokens = tokenize(code)
             imported_ast = parse(tokens)
+        except Exception as e:
+            raise ImportError(f"Cannot import '{source}': Parse error - {e}")
+        
+        # For local files, resolve their imports too
+        if file_path:
             import_base = os.path.dirname(file_path)
             imported_ast = resolve_imports(imported_ast, import_base)
-            
-            if items == '*':
-                ast['variables'].update(imported_ast['variables'])
-                ast['functions'].update(imported_ast['functions'])
-                ast['containers'].update(imported_ast['containers'])
-            else:
-                for item in items:
-                    if item in imported_ast['variables']:
-                        ast['variables'][item] = imported_ast['variables'][item]
-                    elif item in imported_ast['functions']:
-                        ast['functions'][item] = imported_ast['functions'][item]
-                    elif item in imported_ast['containers']:
-                        ast['containers'][item] = imported_ast['containers'][item]
-        except:
-            pass
+        else:
+            # For URLs, can't resolve relative imports
+            imported_ast = resolve_imports(imported_ast, '')
+        
+        if items == '*':
+            ast['variables'].update(imported_ast['variables'])
+            ast['functions'].update(imported_ast['functions'])
+            ast['containers'].update(imported_ast['containers'])
+        else:
+            for item in items:
+                found = False
+                if item in imported_ast['variables']:
+                    ast['variables'][item] = imported_ast['variables'][item]
+                    found = True
+                elif item in imported_ast['functions']:
+                    ast['functions'][item] = imported_ast['functions'][item]
+                    found = True
+                elif item in imported_ast['containers']:
+                    ast['containers'][item] = imported_ast['containers'][item]
+                    found = True
+                
+                if not found:
+                    raise ImportError(f"Cannot import '{item}' from '{source}': Item not found in file")
     
     ast['imports'] = []
     return ast
+
+
+# ============================================================================
+# AST VALIDATION
+# ============================================================================
+
+def validate_ast(ast: Dict) -> None:
+    """Validate AST for common errors before codegen"""
+    errors = []
+    warnings = []
+    
+    # Check main container exists
+    if ast['main_container'] and ast['main_container'] not in ast['containers']:
+        errors.append(f"Main container '{ast['main_container']}' is not defined")
+    
+    # Check for undefined container references in children arrays
+    for cname, container in ast['containers'].items():
+        children = container['attributes'].get('children')
+        if children and children.get('type') == 'array':
+            for elem in children.get('elements', []):
+                if elem.get('type') == 'var':
+                    ref = elem['name']
+                    if ref not in ast['containers']:
+                        warnings.append(f"Container '{cname}' references undefined child '{ref}'")
+                elif elem.get('type') == 'call':
+                    # Parameterized container call
+                    func = elem.get('function', {})
+                    if func.get('type') == 'var':
+                        ref = func['name']
+                        if ref not in ast['containers'] and ref not in ast['functions']:
+                            warnings.append(f"Container '{cname}' references undefined child '{ref}'")
+    
+    # Check for undefined function calls
+    def check_calls(stmts, context):
+        for stmt in stmts:
+            if stmt.get('type') == 'expr_stmt':
+                expr = stmt.get('expr', {})
+                if expr.get('type') == 'call':
+                    func = expr.get('function', {})
+                    if func.get('type') == 'var':
+                        fname = func['name']
+                        # Check built-in functions
+                        builtins = {'go_to', 'go_back', 'visit', 'play', 'wait_sec', 'random', 'length'}
+                        if fname not in ast['functions'] and fname not in builtins:
+                            warnings.append(f"{context}: Undefined function '{fname}' called")
+            for key in ('then', 'else', 'body'):
+                check_calls(stmt.get(key, []), context)
+    
+    for fname, fnode in ast['functions'].items():
+        check_calls(fnode['body'], f"Function '{fname}'")
+    
+    # Check for circular container references (simple check)
+    def find_refs(cname, visited=None):
+        if visited is None:
+            visited = set()
+        if cname in visited:
+            return True  # Circular
+        visited.add(cname)
+        container = ast['containers'].get(cname, {})
+        children = container['attributes'].get('children')
+        if children and children.get('type') == 'array':
+            for elem in children.get('elements', []):
+                if elem.get('type') == 'var':
+                    if find_refs(elem['name'], visited.copy()):
+                        return True
+        return False
+    
+    for cname in ast['containers']:
+        if find_refs(cname):
+            errors.append(f"Circular container reference detected involving '{cname}'")
+    
+    # Print errors and warnings
+    if warnings:
+        print("\n⚠️  Warnings:")
+        for w in warnings:
+            print(f"  - {w}")
+    
+    if errors:
+        print("\n❌ Errors:")
+        for e in errors:
+            print(f"  - {e}")
+        raise ValueError("AST validation failed. Fix the errors above.")
 
 
 # ============================================================================
@@ -752,6 +982,9 @@ class Parser:
         
         base_path = os.path.dirname(os.path.abspath(self.filepath))
         ast = resolve_imports(ast, base_path)
+        
+        # Validate AST
+        validate_ast(ast)
         
         self.ast = ast
         print(f"✓ Parsing complete!")

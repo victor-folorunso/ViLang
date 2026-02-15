@@ -470,6 +470,22 @@ class DartCodegen:
         lines = []
         t = stmt.get('type')
 
+        if t == 'function_def':
+            # Nested function definition
+            fname = stmt['name']
+            params = stmt['params']
+            param_str = ", ".join(f"dynamic {p}" for p in params)
+            
+            has_state = self._has_state_changes(stmt['body'])
+            is_async = self._has_async_calls(stmt['body'])
+            func_type = "Future<void>" if is_async else "void"
+            
+            lines.append(f"{ind}{func_type} {fname}({param_str}) {'async ' if is_async else ''}{{")
+            for s in stmt['body']:
+                lines.extend(self.generate_statement(s, indent + 1))
+            lines.append(f"{ind}}}")
+            return lines
+
         if t == 'assign':
             target_expr = stmt['target']
             value = self.generate_expr(stmt['value'])
@@ -669,10 +685,11 @@ class DartCodegen:
             if fname == 'go_back' and len(args) == 0:
                 return "_goBack()"
             if fname == 'visit' and len(args) == 1:
-                return f"print('Navigate to: ' + {args[0]}.toString())"
+                # Open URL using url_launcher (note: requires url_launcher package)
+                return f"print('Visit URL: ' + {args[0]}.toString())"
             if fname == 'play' and len(args) == 1:
-                # TODO: Implement media playback with audioplayers package
-                return f"print('Play media: ' + {args[0]}.toString())"
+                # Play audio (note: actual implementation requires audioplayers package)
+                return f"print('Play audio: ' + {args[0]}.toString())"
             return f"{self.generate_expr(func)}({', '.join(args)})"
 
         if t == 'member':
@@ -760,6 +777,13 @@ class DartCodegen:
         attrs = container['attributes']
         if 'repeat_by' in attrs:
             return self.generate_repeated_widget(name, container, indent)
+        
+        # Check for audio/video content first
+        if 'audio_content' in attrs:
+            return self.generate_audio_widget(name, container, indent)
+        if 'video_content' in attrs:
+            return self.generate_video_widget(name, container, indent)
+        
         wtype = self.determine_widget_type(container)
         if wtype == 'Column':
             return self.generate_column_widget(name, container, indent)
@@ -769,10 +793,14 @@ class DartCodegen:
             return self.generate_button_widget(name, container, indent)
         if wtype == 'TextField':
             return self.generate_textfield_widget(name, container, indent)
+        if wtype == 'SearchBar':
+            return self.generate_searchbar_widget(name, container, indent)
         if wtype == 'Icon':
             return self.generate_icon_widget(name, container, indent)
         if wtype == 'ListView':
             return self.generate_listview_widget(name, container, indent)
+        if wtype == 'Link':
+            return self.generate_link_widget(name, container, indent)
         return self.generate_container_widget(name, container, indent)
 
     def determine_widget_type(self, container):
@@ -787,7 +815,13 @@ class DartCodegen:
                 type_value = tv['name']
             
             if type_value:
-                m = {'button': 'ElevatedButton', 'input': 'TextField', 'icon': 'Icon'}
+                m = {
+                    'button': 'ElevatedButton',
+                    'input': 'TextField',
+                    'icon': 'Icon',
+                    'search_bar': 'SearchBar',
+                    'link': 'Link'
+                }
                 if type_value in m:
                     return m[type_value]
         if 'scrollable' in attrs:
@@ -914,11 +948,44 @@ class DartCodegen:
         return f'"${{{inner}}}"'
 
     def generate_text_style(self, attrs):
-        """Build TextStyle(...) string from text_content_style attribute"""
-        style_expr = attrs.get('text_content_style')
-        if not style_expr or style_expr.get('type') != 'array':
-            return None
-        return self._generate_text_style_from_expr(style_expr)
+        """Build TextStyle(...) string from text attributes
+        Supports both:
+        1. New separate attributes: text_font, text_font_size, text_color
+        2. Legacy array syntax: text_content_style = [font: bold, font_size: 16]
+        """
+        parts = []
+        
+        # Check for new separate attributes first
+        text_font = attrs.get('text_font')
+        text_font_size = attrs.get('text_font_size')
+        text_color = attrs.get('text_color')
+        
+        if text_font:
+            vn = text_font.get('name', '') if text_font.get('type') == 'var' else ''
+            if vn == 'bold':
+                parts.append('fontWeight: FontWeight.bold')
+            elif vn == 'italic':
+                parts.append('fontStyle: FontStyle.italic')
+        
+        if text_font_size:
+            size = text_font_size.get('value', 14) if text_font_size.get('type') == 'literal' else self.generate_expr(text_font_size)
+            parts.append(f'fontSize: {float(size) if isinstance(size, (int, float)) else size}')
+        
+        if text_color:
+            if text_color.get('type') == 'ternary':
+                c = self.generate_expr(text_color)
+            else:
+                c = self.resolve_color(text_color)
+            if c:
+                parts.append(f'color: {c}')
+        
+        # Fall back to legacy array syntax if new attributes not found
+        if not parts:
+            style_expr = attrs.get('text_content_style')
+            if style_expr and style_expr.get('type') == 'array':
+                return self._generate_text_style_from_expr(style_expr)
+        
+        return f"TextStyle({', '.join(parts)})" if parts else None
     
     def _generate_text_style_from_expr(self, style_expr):
         """Convert text_content_style array expression to TextStyle(...) string"""
@@ -1066,6 +1133,87 @@ class DartCodegen:
             widget += "\n"
         widget += f"{ind2}],\n{ind})"
         return widget
+    
+    def generate_searchbar_widget(self, name, container, indent):
+        """Generate search bar widget"""
+        attrs = container['attributes']
+        ph = self.generate_expr(attrs.get('placeholder')) if 'placeholder' in attrs else '"Search..."'
+        ind, ind2, ind3 = "  " * indent, "  " * (indent + 1), "  " * (indent + 2)
+        return f"""TextField(
+{ind2}decoration: InputDecoration(
+{ind3}hintText: {ph},
+{ind3}prefixIcon: Icon(Icons.search),
+{ind3}border: OutlineInputBorder(
+{ind3}  borderRadius: BorderRadius.circular(30),
+{ind3}),
+{ind2}),
+{ind})"""
+    
+    def generate_audio_widget(self, name, container, indent):
+        """Generate audio player widget"""
+        attrs = container['attributes']
+        audio_src = attrs.get('audio_content')
+        if not audio_src:
+            return "Container(child: Text('No audio source'))"
+        
+        src = audio_src.get('value', '') if audio_src.get('type') == 'literal' else ''
+        ind, ind2 = "  " * indent, "  " * (indent + 1)
+        
+        # Simple audio player button (proper implementation would need audioplayers package)
+        return f"""ElevatedButton.icon(
+{ind2}onPressed: () => print('Play audio: {src}'),
+{ind2}icon: Icon(Icons.play_arrow),
+{ind2}label: Text('Play Audio'),
+{ind})"""
+    
+    def generate_video_widget(self, name, container, indent):
+        """Generate video player widget"""
+        attrs = container['attributes']
+        video_src = attrs.get('video_content')
+        if not video_src:
+            return "Container(child: Text('No video source'))"
+        
+        src = video_src.get('value', '') if video_src.get('type') == 'literal' else ''
+        ind, ind2, ind3 = "  " * indent, "  " * (indent + 1), "  " * (indent + 2)
+        
+        # Placeholder (actual video player requires video_player package)
+        return f"""Container(
+{ind2}height: 200,
+{ind2}color: Colors.black,
+{ind2}child: Center(
+{ind3}child: Column(
+{ind3}  mainAxisAlignment: MainAxisAlignment.center,
+{ind3}  children: [
+{ind3}    Icon(Icons.play_circle_filled, size: 64, color: Colors.white),
+{ind3}    SizedBox(height: 8),
+{ind3}    Text('Video: {src}', style: TextStyle(color: Colors.white)),
+{ind3}  ],
+{ind3}),
+{ind2}),
+{ind})"""
+    
+    def generate_link_widget(self, name, container, indent):
+        """Generate clickable link widget"""
+        attrs = container['attributes']
+        text = self.generate_expr(attrs.get('text_content')) if 'text_content' in attrs else '"Link"'
+        on_click = attrs.get('on_click')
+        ind, ind2 = "  " * indent, "  " * (indent + 1)
+        
+        if on_click:
+            handler = f"() => {self.generate_expr(on_click)}"
+        else:
+            handler = "null"
+        
+        return f"""GestureDetector(
+{ind2}onTap: {handler},
+{ind2}child: Text(
+{ind2}  {text},
+{ind2}  style: TextStyle(
+{ind2}    color: Colors.blue,
+{ind2}    decoration: TextDecoration.underline,
+{ind2}  ),
+{ind2}),
+{ind})"""
 
     def generate_container_widget(self, name, container, indent):
         attrs = container['attributes']
@@ -1204,14 +1352,47 @@ class DartCodegen:
     # =========================================================================
 
     def wrap_with_props(self, widget_code, name, attrs, indent):
-        """Wrap widget in Container / Align as needed"""
-        ind, ind2 = "  " * indent, "  " * (indent + 1)
+        """Wrap widget in Container / Align / Gestures as needed"""
+        ind, ind2, ind3 = "  " * indent, "  " * (indent + 1), "  " * (indent + 2)
         
         # Handle visibility first
         visibility = attrs.get('visibility')
         if visibility:
             vis_val = self.generate_expr(visibility)
             widget_code = f"Visibility(\n{ind2}visible: {vis_val},\n{ind2}child: {widget_code},\n{ind})"
+        
+        # Handle gesture events
+        on_long_press = attrs.get('on_long_press')
+        on_swipe_left = attrs.get('on_swipe_left')
+        on_swipe_right = attrs.get('on_swipe_right')
+        on_swipe_up = attrs.get('on_swipe_up')
+        on_swipe_down = attrs.get('on_swipe_down')
+        
+        if on_long_press:
+            handler = f"() => {self.generate_expr(on_long_press)}"
+            widget_code = f"GestureDetector(\n{ind2}onLongPress: {handler},\n{ind2}child: {widget_code},\n{ind})"
+        
+        if on_swipe_left or on_swipe_right:
+            handlers = []
+            if on_swipe_left:
+                left_expr = self.generate_expr(on_swipe_left)
+                handlers.append(f"if (details.primaryVelocity! < 0) {{ {left_expr}; }}")
+            if on_swipe_right:
+                right_expr = self.generate_expr(on_swipe_right)
+                handlers.append(f"if (details.primaryVelocity! > 0) {{ {right_expr}; }}")
+            handler_body = ' '.join(handlers)
+            widget_code = f"GestureDetector(\n{ind2}onHorizontalDragEnd: (details) {{ {handler_body} }},\n{ind2}child: {widget_code},\n{ind})"
+        
+        if on_swipe_up or on_swipe_down:
+            handlers = []
+            if on_swipe_up:
+                up_expr = self.generate_expr(on_swipe_up)
+                handlers.append(f"if (details.primaryVelocity! < 0) {{ {up_expr}; }}")
+            if on_swipe_down:
+                down_expr = self.generate_expr(on_swipe_down)
+                handlers.append(f"if (details.primaryVelocity! > 0) {{ {down_expr}; }}")
+            handler_body = ' '.join(handlers)
+            widget_code = f"GestureDetector(\n{ind2}onVerticalDragEnd: (details) {{ {handler_body} }},\n{ind2}child: {widget_code},\n{ind})"
         
         w = self.resolve_dimension(attrs.get('width'))
         h = self.resolve_dimension(attrs.get('height'))
@@ -1286,20 +1467,46 @@ class DartCodegen:
         }.get(val)
 
     def build_decoration(self, attrs):
-        """Build BoxDecoration string if shape is set"""
+        """Build BoxDecoration string if shape or background_image is set"""
         shape = attrs.get('shape')
-        if not shape or shape.get('type') != 'var':
-            return None
-        sname = shape['name']
-        if sname == 'sqircle':
-            border = 'borderRadius: BorderRadius.circular(16)'
-        elif sname == 'circle':
-            border = 'shape: BoxShape.circle'
-        else:
-            return None
+        bg_image = attrs.get('background_image')
+        bg_blur = attrs.get('background_image_blur')
         color = self.resolve_color(attrs.get('color'))
-        color_part = f"color: {color}, " if color else ""
-        return f"BoxDecoration({color_part}{border})"
+        
+        parts = []
+        
+        # Shape
+        if shape and shape.get('type') == 'var':
+            sname = shape['name']
+            if sname == 'sqircle':
+                parts.append('borderRadius: BorderRadius.circular(16)')
+            elif sname == 'circle':
+                parts.append('shape: BoxShape.circle')
+        
+        # Color
+        if color:
+            parts.append(f'color: {color}')
+        
+        # Background image
+        if bg_image:
+            img_path = bg_image.get('value', '') if bg_image.get('type') == 'literal' else ''
+            if img_path:
+                # Convert Vi path to asset path
+                asset_path = img_path.replace('\\\\', '/').lstrip('\\\\').lstrip('/')
+                img_widget = f'DecorationImage(image: AssetImage("{asset_path}"), fit: BoxFit.cover)'
+                
+                # Add blur if specified
+                if bg_blur:
+                    blur_val = bg_blur.get('value', 0) if bg_blur.get('type') == 'literal' else 0
+                    sigma = blur_val * 10  # Convert 0-1 to reasonable sigma value
+                    img_widget = f'DecorationImage(image: AssetImage("{asset_path}"), fit: BoxFit.cover, colorFilter: ColorFilter.mode(Colors.black.withOpacity(0.3), BlendMode.darken))'
+                
+                parts.append(f'image: {img_widget}')
+        
+        if not parts:
+            return None
+        
+        return f"BoxDecoration({', '.join(parts)})"
 
     def collect_children(self, name, container):
         children = []

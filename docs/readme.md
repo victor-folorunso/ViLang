@@ -1,114 +1,159 @@
 # Vi Language
 
-**Build cross-platform apps with simple, intuitive syntax.**
+A declarative UI language that compiles to Flutter/Dart. Build cross-platform apps with Python-inspired syntax.
 
-Vi is a declarative language that compiles to Flutter, letting you create mobile, web, and desktop apps by simply describing what you want.
+## Features
 
----
+- **Declarative UI**: Define what you want, not how to build it
+- **Hot Restart**: See changes instantly on save
+- **Responsive by Default**: Breakpoints and adaptive layouts built-in
+- **State Management**: Automatic UI updates when data changes
+- **Cross-Platform**: Compile to Android, iOS, and Web from one codebase
 
-## Quick Example
+## Quick Start
+
 ```vi
-<# A simple counter app #>
-current_count = 0
+<# Counter App in 20 lines #>
+count = 0
 
 increment():
-  current_count = current_count + 1
+  count = count + 1
 
 main app:
+  width = 100
   height = max
-  width = max
-  children = [counter_display, button]
+  children = [counter, button]
 
-counter_display:
-  text_content = "Count: {current_count}"
-  align_self = center
+counter:
+  text_content = "Count: {count}"
+  text_font_size = 32
 
 button:
-  text_content = "Increment"
+  type = button
+  text_content = "+"
   on_click: increment()
-  align_self = bottom, center
 ```
 
-**Result:** A working cross-platform counter app.
-
----
-
-## 🚀 Features
-
-- **Simple Syntax** - Describe your UI, Vi handles the rest
-- **Cross-Platform** - Android, iOS, Web, and Desktop from one codebase
-- **Declarative** - Containers, attributes, and events
-- **Type Inference** - No type declarations needed
-- **Zero Setup** - Vi includes everything you need
-
----
-
-## 📦 Installation
-
-1. **Download** `vi.exe` from [Releases](https://github.com/victor-folorunso/ViLang/releases)
-2. **Add to PATH** - Add the Vi directory to your system PATH
-3. **Done** - Vi includes its own Flutter SDK internally
-
-**Prerequisites:**
-- Android Studio (for Android emulator) OR
-- Xcode (for iOS simulator, macOS only)
-
----
-
-## 🏃 Quick Start
+Run it:
 ```bash
-# Create new project
-create main.vi in any folder
-
-# Navigate to project
-cd folder
-
-# Run on emulator
-vi run
+vi run main.vi
 ```
 
-Vi will show available emulators - just pick one and it handles everything else.
+## Installation
 
----
+Vi requires Flutter to be installed on your system.
 
-## 🎯 How It Works
+1. Install Flutter: https://flutter.dev/docs/get-started/install
+2. Clone this repo
+3. Add Vi to your PATH (or run from source)
 
-Vi compiles your code to a widget tree (JSON), then uses a Flutter runtime to render your app dynamically. You write simple Vi code, and Vi manages the Flutter complexity behind the scenes.
+## Commands
 
-**Benefits:**
-- Focus on describing UI, not managing boilerplate
-- Simplified syntax
-- Automatic device selection and emulator management
-- Apps are generated on-the-fly from your Vi code
+```bash
+vi run <file>           # Development mode with hot restart
+vi create android       # Build APK
+vi create ios           # Build iOS app  
+vi create web           # Build web app
+```
 
----
+## Syntax Highlights
 
-## 📖 Learn More
+### Implicit Arrays
+```vi
+colors = red, blue, green  # Single-line arrays don't need []
+```
 
-- **[Language Documentation](https://github.com/victor-folorunso/ViLang/wiki)** - Complete syntax guide and examples
+### Range Syntax
+```vi
+config:
+  screens:
+    mobile = 0 to 600     # More intuitive than [0, 600]
+    tablet = 600 to 1024
+```
 
----
+### Nested Functions
+```vi
+outer():
+  inner(x):
+    return x * 2
+  result = inner(5)
+```
 
-## Current Status
+### URL Imports
+```vi
+from "https://example.com/components.vi" import header
+```
 
-Vi is in **early development**. Core features are working:
+### Events
+```vi
+card:
+  on_click: view_details()
+  on_long_press: show_menu()
+  on_swipe_left: delete()
+```
 
-- Vi → Flutter compilation
-- Android emulator integration
-- 🚧 iOS deployment (in progress)
-- 🚧 Web deployment (in progress)
+### Dynamic Grids
+```vi
+grid:
+  repeat_by = 3, 3
+  width = 20
+  height = 20
+  color = gray
+  on_click: toggle(grid)
 
----
+toggle(cell):
+  cell:
+    color = blue if (cell.color == gray) else gray
+```
+
+## Documentation
+
+See **[wiki.md](wiki.md)** for complete documentation including:
+- All container attributes
+- Control flow
+- Functions and variables
+- Multi-screen navigation
+- Configuration and breakpoints
+- Complete examples
+
+## Examples
+
+Check the `examples/` directory for:
+- Counter app
+- To-do list
+- TicTacToe game
+- Multi-screen navigation
+- Form validation
+
+## Architecture
+
+```
+.vi file → Parser → AST → Code Generator → Flutter/Dart → App
+```
+
+Vi compiles to clean, readable Dart code that uses Flutter widgets directly.
+
+## Project Status
+
+**Current**: v0.9 - Core language complete, production-ready for simple apps
+
+**Coming Soon**:
+- Database integration (local + Supabase)
+- Animation system
+- Advanced media widgets
 
 ## Contributing
 
-Vi is open source! Contributions, bug reports, and feedback are welcome.
+Vi is actively developed. Feature requests and bug reports welcome!
 
----
+## Philosophy
 
-## 💬 Community
+Vi believes in:
+- **Explicit over implicit**: What you write is what you get
+- **Simplicity**: Common tasks should be simple
+- **No magic**: Clear compilation model, readable output
+- **Progressive disclosure**: Start simple, add complexity as needed
 
-- **GitHub Discussions** - Ask questions, share your Vi projects
-- **Issues** - Report bugs or request features
+## License
 
----
+MIT License - See LICENSE file
