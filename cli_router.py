@@ -10,13 +10,13 @@ class Vi:
         self.filepath = Path.cwd() / "main.vi"
         self.ast = None
 
-    def run(self, hot_reload=False):
-        """Run Vi app on emulator"""
+    def run(self):
+        """Run Vi app on emulator with hot restart on file changes"""
         parser = Parser(self.filepath)
         self.ast = parser.parse()
         
         runtime = Runtime(self.ast, vi_file=self.filepath)
-        runtime.run(hot_reload=hot_reload)
+        runtime.run()
 
     def create(self, target):
         """Compile Vi app for target platform"""

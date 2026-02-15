@@ -90,6 +90,65 @@ class DartCodegen:
         for fname, fnode in self.ast['functions'].items():
             find_calls(fnode['body'], fname)
 
+        # 5. Identify screen containers (main + any passed to go_to())
+        self.screen_containers = set()
+        if self.ast['main_container']:
+            self.screen_containers.add(self.ast['main_container'])
+
+        def find_screens(stmts, fname=None):
+            for stmt in stmts:
+                if stmt.get('type') == 'expr_stmt':
+                    expr = stmt.get('expr', {})
+                    if expr.get('type') == 'call':
+                        func = expr.get('function', {})
+                        fn = func.get('name') if func.get('type') == 'var' else None
+                        if fn == 'go_to':
+                            args = expr.get('args', [])
+                            if args and args[0].get('type') == 'var':
+                                self.screen_containers.add(args[0]['name'])
+                            # Function containing go_to must not be wrapped in setState
+                            if fname:
+                                self.called_by_functions.add(fname)
+                        if fn == 'go_back' and fname:
+                            self.called_by_functions.add(fname)
+                for key in ('then', 'else', 'body'):
+                    find_screens(stmt.get(key, []), fname)
+
+        for fname, fnode in self.ast['functions'].items():
+            find_screens(fnode['body'], fname)
+
+        # 6. Parse config block
+        config = self.ast.get('config', {})
+        self.config_attrs = {k: v for k, v in config.get('attributes', {}).items()
+                             if k != 'icon'}  # icon is build-time only
+        self.config_icon = config.get('attributes', {}).get('icon')
+        self.splash_attrs = None
+        self.breakpoints = {}  # {name: (lo, hi_or_None)}
+
+        for child in config.get('children_def', []):
+            cname = child.get('name', '')
+            if cname == 'splash':
+                self.splash_attrs = child.get('attributes', {})
+            elif cname == 'screens':
+                for bname, bexpr in child.get('attributes', {}).items():
+                    if bexpr.get('type') == 'array':
+                        elems = bexpr.get('elements', [])
+                        if len(elems) == 2:
+                            lo_e, hi_e = elems
+                            lo = lo_e.get('value', 0) if lo_e.get('type') == 'literal' else 0
+                            hi = None if (hi_e.get('type') == 'var' and hi_e.get('name') == 'max') \
+                                      else hi_e.get('value', 9999)
+                            self.breakpoints[bname] = (lo, hi)
+
+        # Validate no overlapping breakpoints — warn but don't crash
+        sorted_bp = sorted(self.breakpoints.items(), key=lambda x: x[1][0])
+        for i in range(len(sorted_bp) - 1):
+            name_a, (lo_a, hi_a) = sorted_bp[i]
+            name_b, (lo_b, _) = sorted_bp[i + 1]
+            if hi_a is None or lo_b < hi_a:
+                print(f"⚠️  Warning: screens '{name_a}' and '{name_b}' have overlapping ranges — "
+                      f"both getters may be true simultaneously. Fix: '{name_a}' should end at {lo_b}.")
+
     def _base_name(self, expr):
         """Walk member-access chain to get the root var name"""
         while expr.get('type') == 'member':
@@ -118,6 +177,8 @@ class DartCodegen:
 
     def generate_app_widget(self):
         lines = []
+        has_multi_screen = len(self.screen_containers) > 1
+        has_splash = self.splash_attrs is not None
 
         lines += [
             "class ViApp extends StatefulWidget {",
@@ -129,6 +190,34 @@ class DartCodegen:
             "",
             "class _ViAppState extends State<ViApp> {",
         ]
+
+        # Navigation state
+        if has_multi_screen:
+            main = self.ast['main_container']
+            lines.append(f"  String _currentScreen = '{main}';")
+            lines.append("  final List<String> _screenHistory = [];")
+            lines.append("")
+
+        # Splash state
+        if has_splash:
+            lines.append("  bool _showSplash = true;")
+            lines.append("")
+
+        # Config runtime vars
+        for k, v in self.config_attrs.items():
+            vtype = self.infer_type(v)
+            init = self.generate_expr(v)
+            lines.append(f"  {vtype} _config_{k} = {init};")
+        if self.config_attrs:
+            lines.append("")
+
+        # Breakpoint getters
+        for bname, (lo, hi) in self.breakpoints.items():
+            w = "MediaQuery.of(context).size.width"
+            cond = f"{w} >= {lo}" if hi is None else f"{w} >= {lo} && {w} < {hi}"
+            lines.append(f"  bool get {bname} => {cond};")
+        if self.breakpoints:
+            lines.append("")
 
         # Global state variables
         for vname, vnode in self.ast['variables'].items():
@@ -147,14 +236,56 @@ class DartCodegen:
                     lines.append(f"  List<{dtype}> {cname}_{prop} = List.filled({count}, {default}, growable: false);")
                 lines.append("")
 
-        # Functions
+        # initState — splash timer
+        if has_splash:
+            duration = self.splash_attrs.get('duration')
+            secs = duration.get('value', 2) if duration and duration.get('type') == 'literal' else 2
+            lines += [
+                "  @override",
+                "  void initState() {",
+                "    super.initState();",
+                f"    Future.delayed(const Duration(seconds: {secs}), () {{",
+                "      if (mounted) setState(() => _showSplash = false);",
+                "    });",
+                "  }",
+                "",
+            ]
+
+        # Navigation helpers
+        if has_multi_screen:
+            lines += [
+                "  void _goTo(String screen) {",
+                "    setState(() {",
+                "      _screenHistory.add(_currentScreen);",
+                "      _currentScreen = screen;",
+                "    });",
+                "  }",
+                "",
+                "  void _goBack() {",
+                "    if (_screenHistory.isEmpty) return;",
+                "    setState(() => _currentScreen = _screenHistory.removeLast());",
+                "  }",
+                "",
+            ]
+
+        # User functions
         for fname, fnode in self.ast['functions'].items():
             lines.extend(self.generate_function(fname, fnode))
             lines.append("")
 
         # build()
         lines += ["  @override", "  Widget build(BuildContext context) {"]
-        if self.ast['main_container']:
+        if has_splash:
+            lines.append("    if (_showSplash) return _buildSplashScreen();")
+        if has_multi_screen:
+            lines += [
+                "    return PopScope(",
+                "      canPop: _screenHistory.isEmpty,",
+                "      onPopInvokedWithResult: (didPop, _) { if (!didPop) _goBack(); },",
+                "      child: _buildCurrentScreen(),",
+                "    );",
+            ]
+        elif self.ast['main_container']:
             mn = self.ast['main_container']
             widget = self.generate_widget(mn, self.ast['containers'][mn], indent=2)
             lines += [
@@ -166,8 +297,82 @@ class DartCodegen:
             ]
         else:
             lines.append("    return Scaffold(body: Center(child: Text('No main container')));")
-        lines += ["  }", "}"]
+        lines += ["  }", ""]
 
+        # Splash builder
+        if has_splash:
+            lines.extend(self._generate_splash_builder())
+            lines.append("")
+
+        # Screen builders
+        if has_multi_screen:
+            lines.extend(self._generate_screen_dispatcher())
+            lines.append("")
+            for sname in self.screen_containers:
+                if sname in self.ast['containers']:
+                    lines.extend(self._generate_screen_builder(sname))
+                    lines.append("")
+
+        lines.append("}")
+        return lines
+
+    def _generate_splash_builder(self):
+        lines = ["  Widget _buildSplashScreen() {"]
+        attrs = self.splash_attrs or {}
+        color = self.resolve_color(attrs.get('color')) or 'Colors.white'
+        image_expr = attrs.get('image')
+        logo_expr = attrs.get('logo')
+        text_expr = attrs.get('text_content')
+
+        body_parts = []
+        if logo_expr:
+            path = logo_expr.get('value', '') if logo_expr.get('type') == 'literal' else ''
+            body_parts.append(f"Image.asset('{path}', width: 120, height: 120)")
+        if text_expr:
+            text_str = self._coerce_to_string(text_expr)
+            body_parts.append(f"const SizedBox(height: 16)")
+            body_parts.append(f"Text({text_str})")
+
+        if body_parts:
+            children = ', '.join(body_parts)
+            child = f"Column(mainAxisAlignment: MainAxisAlignment.center, children: [{children}])"
+        else:
+            child = "const SizedBox.shrink()"
+
+        if image_expr:
+            path = image_expr.get('value', '') if image_expr.get('type') == 'literal' else ''
+            bg = f"DecorationImage(image: AssetImage('{path}'), fit: BoxFit.cover)"
+            deco = f"BoxDecoration(color: {color}, image: {bg})"
+            container = f"Container(width: double.infinity, height: double.infinity, decoration: {deco}, child: Center(child: {child}))"
+        else:
+            container = f"Container(width: double.infinity, height: double.infinity, color: {color}, child: Center(child: {child}))"
+
+        lines.append(f"    return Scaffold(body: {container});")
+        lines.append("  }")
+        return lines
+
+    def _generate_screen_dispatcher(self):
+        lines = ["  Widget _buildCurrentScreen() {"]
+        lines.append("    switch (_currentScreen) {")
+        for sname in self.screen_containers:
+            if sname in self.ast['containers']:
+                lines.append(f"      case '{sname}': return _build_{sname}();")
+        lines.append("      default: return _build_" + self.ast['main_container'] + "();")
+        lines.append("    }")
+        lines.append("  }")
+        return lines
+
+    def _generate_screen_builder(self, sname):
+        lines = [f"  Widget _build_{sname}() {{"]
+        widget = self.generate_widget(sname, self.ast['containers'][sname], indent=2)
+        lines += [
+            "    return Scaffold(",
+            "      body: SafeArea(",
+            f"        child: {widget},",
+            "      ),",
+            "    );",
+            "  }",
+        ]
         return lines
 
     def _list_elem_type(self, prop):
@@ -224,6 +429,7 @@ class DartCodegen:
                 if self._has_state_changes(stmt.get(key, [])):
                     return True
         return False
+
     
     def _has_async_calls(self, stmts):
         """Check if function body contains wait_sec calls"""
@@ -331,6 +537,13 @@ class DartCodegen:
             # Regular for loop
             iterable = self.generate_expr(iterable_expr)
             lines.append(f"{ind}for (var {var_name} in {iterable}) {{")
+            for s in stmt['body']:
+                lines.extend(self.generate_statement(s, indent + 1))
+            lines.append(f"{ind}}}")
+
+        elif t == 'while':
+            cond = self.generate_expr(stmt['condition'])
+            lines.append(f"{ind}while ({cond}) {{")
             for s in stmt['body']:
                 lines.extend(self.generate_statement(s, indent + 1))
             lines.append(f"{ind}}}")
@@ -449,8 +662,13 @@ class DartCodegen:
                 return f"(Random().nextInt({args[1]} - {args[0]} + 1) + {args[0]})"
             if fname == 'wait_sec' and len(args) == 1:
                 return f"await Future.delayed(Duration(seconds: {args[0]}))"
+            if fname == 'go_to' and len(args) == 1:
+                screen = expr.get('args', [])[0]
+                sname = screen.get('name', '') if screen.get('type') == 'var' else ''
+                return f"_goTo('{sname}')"
+            if fname == 'go_back' and len(args) == 0:
+                return "_goBack()"
             if fname == 'visit' and len(args) == 1:
-                # TODO: Implement proper navigation with Navigator.push when multiple screens exist
                 return f"print('Navigate to: ' + {args[0]}.toString())"
             if fname == 'play' and len(args) == 1:
                 # TODO: Implement media playback with audioplayers package
@@ -462,9 +680,13 @@ class DartCodegen:
             field = expr['field']
             
             # Special case: repeat_by.index -> index (when in repeat context)
-            if (self.in_repeat_context and obj_expr.get('type') == 'var' 
+            if (self.in_repeat_context and obj_expr.get('type') == 'var'
                 and obj_expr['name'] == 'repeat_by' and field == 'index'):
                 return 'index'
+
+            # config.x -> _config_x
+            if obj_expr.get('type') == 'var' and obj_expr['name'] == 'config':
+                return f'_config_{field}'
 
             # pattern: cell_var.property  (for-loop or param cell reference)
             if obj_expr.get('type') == 'var':
@@ -547,6 +769,8 @@ class DartCodegen:
             return self.generate_button_widget(name, container, indent)
         if wtype == 'TextField':
             return self.generate_textfield_widget(name, container, indent)
+        if wtype == 'Icon':
+            return self.generate_icon_widget(name, container, indent)
         if wtype == 'ListView':
             return self.generate_listview_widget(name, container, indent)
         return self.generate_container_widget(name, container, indent)
@@ -563,7 +787,7 @@ class DartCodegen:
                 type_value = tv['name']
             
             if type_value:
-                m = {'button': 'ElevatedButton', 'input': 'TextField'}
+                m = {'button': 'ElevatedButton', 'input': 'TextField', 'icon': 'Icon'}
                 if type_value in m:
                     return m[type_value]
         if 'scrollable' in attrs:
@@ -576,11 +800,20 @@ class DartCodegen:
             return 'Text'
         return 'Container'
 
+    def _child_has_positional_align(self, cc):
+        """True if the child has a multi-value align_self (e.g. bottom, right)"""
+        a = cc.get('attributes', {}).get('align_self')
+        return a is not None and a.get('type') == 'array'
+
     def generate_column_widget(self, name, container, indent):
         attrs = container['attributes']
         children = self.collect_children(name, container)
         if not children:
             return "Container()"
+
+        # Use Stack when any child has a 2-axis positional align_self
+        if any(self._child_has_positional_align(cc) for _, cc in children):
+            return self.generate_stack_widget(name, container, children, indent)
 
         ind, ind2 = "  " * indent, "  " * (indent + 1)
         main_ax, cross_ax = self._column_alignment(attrs.get('align_children'))
@@ -595,6 +828,9 @@ class DartCodegen:
         has_expanded_child = any(_is_max_height(cc) for _, cc in children)
         main_size = "MainAxisSize.max" if has_expanded_child else "MainAxisSize.min"
 
+        padding_expr = attrs.get('children_padding')
+        padding_val = self.resolve_dimension(padding_expr) if padding_expr else None
+
         widget = (f"Column(\n{ind2}mainAxisAlignment: {main_ax},\n"
                   f"{ind2}crossAxisAlignment: {cross_ax},\n"
                   f"{ind2}mainAxisSize: {main_size},\n{ind2}children: [\n")
@@ -602,10 +838,26 @@ class DartCodegen:
             cw = self.generate_widget(cn, cc, indent + 1)
             if _is_max_height(cc):
                 cw = f"Expanded(\n{ind2}  child: {cw},\n{ind2})"
-            widget += f"{ind2}  {cw}"
-            if i < len(children) - 1:
-                widget += ","
-            widget += "\n"
+            widget += f"{ind2}  {cw},\n"
+            if padding_val and i < len(children) - 1:
+                widget += f"{ind2}  SizedBox(height: {padding_val}),\n"
+        widget += f"{ind2}],\n{ind})"
+        return self.wrap_with_props(widget, name, attrs, indent)
+
+    def generate_stack_widget(self, name, container, children, indent):
+        attrs = container['attributes']
+        ind, ind2 = "  " * indent, "  " * (indent + 1)
+        widget = f"Stack(\n{ind2}children: [\n"
+        for cn, cc in children:
+            align_self = cc.get('attributes', {}).get('align_self')
+            alignment = self._resolve_align_self(align_self) if align_self else None
+            # Temporarily strip align_self so wrap_with_props doesn't double-wrap
+            stripped = dict(cc)
+            stripped['attributes'] = {k: v for k, v in cc.get('attributes', {}).items() if k != 'align_self'}
+            cw = self.generate_widget(cn, stripped, indent + 1)
+            if alignment:
+                cw = f"Align(\n{ind2}  alignment: {alignment},\n{ind2}  child: {cw},\n{ind2})"
+            widget += f"{ind2}  {cw},\n"
         widget += f"{ind2}],\n{ind})"
         return self.wrap_with_props(widget, name, attrs, indent)
 
@@ -637,11 +889,29 @@ class DartCodegen:
                 and 'text_content' in self.modified_containers[name]):
             text_str = f"{name}_text_content[index]"
         else:
-            text_str = self.generate_expr(text_content) if text_content else '""'
+            text_str = self._coerce_to_string(text_content) if text_content else '""'
 
         style = self.generate_text_style(attrs)
         widget = f"Text({text_str}{', style: ' + style if style else ''})"
+        # Center text inside its container if align_children = center
+        align = self._align_val(attrs.get('align_children'))
+        if align in ('center', 'centre'):
+            widget = f"Center(child: {widget})"
         return self.wrap_with_props(widget, name, attrs, indent)
+
+    def _coerce_to_string(self, expr):
+        """Ensure a text_content expression is a Dart String for Text()"""
+        if not expr:
+            return '""'
+        # Already a string literal — generate directly (handles interpolation too)
+        if expr.get('type') == 'literal' and expr.get('value_type') == 'string':
+            return self.generate_expr(expr)
+        # Ternary where both branches may be strings — generate directly
+        if expr.get('type') == 'ternary':
+            return self.generate_expr(expr)
+        # Anything else (var, binary_op, call, etc.) — wrap in string interpolation
+        inner = self.generate_expr(expr)
+        return f'"${{{inner}}}"'
 
     def generate_text_style(self, attrs):
         """Build TextStyle(...) string from text_content_style attribute"""
@@ -700,19 +970,20 @@ class DartCodegen:
                 btn_style_parts.append("shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))")
             elif sname == 'circle':
                 btn_style_parts.append("shape: const CircleBorder()")
-        w = self.resolve_dimension(attrs.get('width'))
-        h = self.resolve_dimension(attrs.get('height'))
-        if w and h:
-            btn_style_parts.append(f"minimumSize: Size({w}, {h})")
-            btn_style_parts.append(f"maximumSize: Size({w}, {h})")
-
         style_str = f"ElevatedButton.styleFrom({', '.join(btn_style_parts)})" if btn_style_parts else None
         button = f"ElevatedButton(\n{ind2}onPressed: {on_press},\n"
         if style_str:
             button += f"{ind2}style: {style_str},\n"
         button += f"{ind2}child: {text_widget},\n{ind})"
 
-        # Apply alignment only (skip Container wrapping — color/shape already on button)
+        # Size via SizedBox wrapper so text is never clipped by styleFrom constraints
+        w = self.resolve_dimension(attrs.get('width'))
+        h = self.resolve_dimension(attrs.get('height'))
+        if w or h:
+            w_str = w if w else "double.infinity"
+            h_str = h if h else "double.infinity"
+            button = f"SizedBox(\n{ind2}width: {w_str},\n{ind2}height: {h_str},\n{ind2}child: {button},\n{ind})"
+
         align_self = attrs.get('align_self')
         if align_self:
             alignment = self._resolve_align_self(align_self)
@@ -730,6 +1001,56 @@ class DartCodegen:
         ph = self.generate_expr(attrs.get('placeholder')) if 'placeholder' in attrs else '"Enter text"'
         ind, ind2, ind3 = "  " * indent, "  " * (indent + 1), "  " * (indent + 2)
         return f"TextField(\n{ind2}decoration: InputDecoration(\n{ind3}hintText: {ph},\n{ind2}),\n{ind})"
+
+    def generate_icon_widget(self, name, container, indent):
+        attrs = container['attributes']
+        icon_expr = attrs.get('icon')
+        icon_str = self._resolve_icon(icon_expr)
+        color = self.resolve_color(attrs.get('color'))
+        ind, ind2 = "  " * indent, "  " * (indent + 1)
+        color_str = f", color: {color}" if color else ""
+        widget = f"Icon({icon_str}{color_str})"
+        on_click = attrs.get('on_click')
+        if on_click:
+            on_press = f"() => {self.generate_expr(on_click)}"
+            widget = f"GestureDetector(\n{ind2}onTap: {on_press},\n{ind2}child: {widget},\n{ind})"
+        return self.wrap_with_props(widget, name, attrs, indent)
+
+    def _resolve_icon(self, icon_expr):
+        if not icon_expr:
+            return 'Icons.circle'
+        name = (icon_expr.get('value') if icon_expr.get('type') == 'literal'
+                else icon_expr.get('name', ''))
+        return {
+            'plus': 'Icons.add',
+            'add': 'Icons.add',
+            'trash': 'Icons.delete',
+            'delete': 'Icons.delete',
+            'check_circle': 'Icons.check_circle',
+            'circle_outline': 'Icons.radio_button_unchecked',
+            'close': 'Icons.close',
+            'settings': 'Icons.settings',
+            'home': 'Icons.home',
+            'back': 'Icons.arrow_back',
+            'forward': 'Icons.arrow_forward',
+            'search': 'Icons.search',
+            'menu': 'Icons.menu',
+            'star': 'Icons.star',
+            'heart': 'Icons.favorite',
+            'share': 'Icons.share',
+            'edit': 'Icons.edit',
+            'camera': 'Icons.camera_alt',
+            'image': 'Icons.image',
+            'info': 'Icons.info',
+            'warning': 'Icons.warning',
+            'error': 'Icons.error',
+            'check': 'Icons.check',
+            'refresh': 'Icons.refresh',
+            'send': 'Icons.send',
+            'lock': 'Icons.lock',
+            'person': 'Icons.person',
+            'notification': 'Icons.notifications',
+        }.get(name, f'Icons.circle')
 
     def generate_listview_widget(self, name, container, indent):
         children = self.collect_children(name, container)
@@ -794,10 +1115,14 @@ class DartCodegen:
         has_state = name in self.modified_containers
 
         ind, ind2, ind3 = "  " * indent, "  " * (indent + 1), "  " * (indent + 2)
+        padding_expr = attrs.get('children_padding')
+        padding_val = self.resolve_dimension(padding_expr) if padding_expr else None
+        spacing_str = f"{ind2}mainAxisSpacing: {padding_val},\n{ind2}crossAxisSpacing: {padding_val},\n" if padding_val else ""
         code = (f"GridView.count(\n{ind2}crossAxisCount: {cols},\n"
                 f"{ind2}shrinkWrap: true,\n"
                 f"{ind2}physics: const NeverScrollableScrollPhysics(),\n"
                 f"{ind2}childAspectRatio: 1.0,\n"
+                f"{spacing_str}"
                 f"{ind2}children: List.generate({count}, (index) {{\n"
                 f"{ind3}return ")
         code += self.generate_cell_widget(name, template_attrs, has_state, indent + 3)
@@ -940,6 +1265,19 @@ class DartCodegen:
         return None
 
     def _resolve_align_self(self, expr):
+        if expr and expr.get('type') == 'array':
+            vals = frozenset(
+                e.get('name', '') for e in expr.get('elements', [])
+                if e.get('type') == 'var'
+            )
+            return {
+                frozenset({'bottom', 'right'}): 'Alignment.bottomRight',
+                frozenset({'bottom', 'left'}):  'Alignment.bottomLeft',
+                frozenset({'top',    'right'}): 'Alignment.topRight',
+                frozenset({'top',    'left'}):  'Alignment.topLeft',
+                frozenset({'top',    'center'}): 'Alignment.topCenter',
+                frozenset({'bottom', 'center'}): 'Alignment.bottomCenter',
+            }.get(vals)
         val = self._align_val(expr)
         return {
             'center': 'Alignment.center', 'centre': 'Alignment.center',

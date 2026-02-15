@@ -45,7 +45,7 @@ def tokenize(source: str) -> List[Dict[str, Any]]:
     tokens = []
     lines = source.split('\n')
     indent_stack = [0]
-    keywords = {'main', 'from', 'import', 'if', 'else', 'for', 'in', 'return', 'true', 'false', 'and', 'or', 'not', 'all', 'range'}
+    keywords = {'main', 'from', 'import', 'if', 'else', 'for', 'in', 'while', 'return', 'true', 'false', 'and', 'or', 'not', 'all', 'range'}
     
     for line_num, line in enumerate(lines, 1):
         original_line = line_map.get(line_num, line_num)
@@ -440,6 +440,29 @@ def parse(tokens: List[Dict]) -> Dict:
             
             return {'type': 'for', 'var': var_name, 'iterable': iterable, 'body': for_body}
         
+        # While loop
+        if token['type'] == 'KEYWORD' and token['value'] == 'while':
+            consume()
+            if peek()['type'] == 'LPAREN':
+                consume('LPAREN')
+            condition = parse_expression()
+            if peek()['type'] == 'RPAREN':
+                consume('RPAREN')
+            consume('COLON')
+            skip_newlines()
+
+            consume('INDENT')
+            while_body = []
+            while peek()['type'] not in ['DEDENT', 'EOF']:
+                if peek()['type'] == 'NEWLINE':
+                    skip_newlines()
+                    continue
+                while_body.append(parse_statement())
+                skip_newlines()
+            consume('DEDENT')
+
+            return {'type': 'while', 'condition': condition, 'body': while_body}
+
         # Container modification: container_name: attribute = value
         if token['type'] == 'IDENTIFIER' and peek(1)['type'] == 'COLON':
             target_name = consume('IDENTIFIER')['value']
@@ -536,7 +559,8 @@ def parse(tokens: List[Dict]) -> Dict:
         'variables': {},
         'functions': {},
         'containers': {},
-        'main_container': None
+        'main_container': None,
+        'config': {}
     }
     
     skip_newlines()
@@ -635,7 +659,10 @@ def parse(tokens: List[Dict]) -> Dict:
                 consume()
                 skip_newlines()
                 container = parse_container_body()
-                ast['containers'][name] = container
+                if name == 'config':
+                    ast['config'] = container
+                else:
+                    ast['containers'][name] = container
             else:
                 skip_newlines()
         

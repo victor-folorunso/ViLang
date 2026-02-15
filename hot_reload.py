@@ -1,7 +1,8 @@
 """
-Hot Reload Watcher for Vi Language
-Watches .vi files and regenerates Dart code on changes
-Direct AST → Dart pipeline
+Hot Restart Watcher for Vi Language
+Watches .vi files and triggers a full Flutter hot restart on changes.
+Hot restart is used (not hot reload) because Vi regenerates the entire
+main.dart on every save — hot reload can't safely patch a fully changed tree.
 """
 
 import time
@@ -24,44 +25,40 @@ class ViFileHandler(FileSystemEventHandler):
     
     def on_modified(self, event):
         if event.src_path.endswith('.vi'):
-            # Debounce rapid file changes
             current_time = time.time()
             if current_time - self.last_modified < self.debounce_seconds:
                 return
             self.last_modified = current_time
             
             print(f"\n🔄 Detected change in {event.src_path}")
-            self.regenerate_dart()
+            self.regenerate_and_restart()
     
-    def regenerate_dart(self):
-        """Regenerate Dart code from Vi source - Direct AST → Dart"""
+    def regenerate_and_restart(self):
+        """Regenerate Dart code from Vi source then hot restart Flutter"""
         try:
-            # Parse Vi file to AST
             parser = Parser(str(self.vi_file))
             ast = parser.parse()
             
-            # Generate Dart code directly from AST
             codegen = DartCodegen(ast)
             dart_code = codegen.generate_full_app()
             
-            # Write to main.dart
             main_dart = self.app_dir / "lib" / "main.dart"
             main_dart.write_text(dart_code)
             
             print("✓ Dart code regenerated")
             
-            # Trigger Flutter hot reload by sending 'r' to the process
             if self.flutter_process and self.flutter_process.poll() is None:
-                self.flutter_process.stdin.write('r\n')
+                # Capital R = hot restart (full VM reboot, clears all state)
+                self.flutter_process.stdin.write('R\n')
                 self.flutter_process.stdin.flush()
-                print("✓ Hot reload triggered")
+                print("✓ Hot restart triggered")
             
         except Exception as e:
             print(f"❌ Error regenerating code: {e}")
 
 
-class HotReloadWatcher:
-    """Watches Vi files and triggers hot reload"""
+class HotRestartWatcher:
+    """Watches Vi files and triggers hot restart on change"""
     
     def __init__(self, vi_file, app_dir, flutter_process):
         self.vi_file = Path(vi_file).resolve()
@@ -70,20 +67,17 @@ class HotReloadWatcher:
         self.observer = None
     
     def start(self):
-        """Start watching for file changes"""
         event_handler = ViFileHandler(self.vi_file, self.app_dir, self.flutter_process)
         self.observer = Observer()
         
-        # Watch the directory containing the Vi file
         watch_dir = self.vi_file.parent
         self.observer.schedule(event_handler, str(watch_dir), recursive=False)
         
         self.observer.start()
-        print(f"👁️  Watching {self.vi_file.name} for changes...")
+        print(f"  Watching {self.vi_file.name} for changes (hot restart on save)...")
         print("   Press Ctrl+C to stop")
     
     def stop(self):
-        """Stop watching"""
         if self.observer:
             self.observer.stop()
             self.observer.join()
